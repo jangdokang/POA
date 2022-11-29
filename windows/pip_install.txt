@@ -1,0 +1,7 @@
+pip install fastapi
+pip install "uvicorn[standard]"
+pip install fire
+pip install dhooks
+pip install loguru
+pip install httpx
+pip install ccxt
