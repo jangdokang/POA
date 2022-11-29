@@ -21,6 +21,7 @@ httpx==0.23.1
 idna==3.4
 loguru==0.6.0
 multidict==6.0.2
+orjson==3.8.2
 pycares==4.2.2
 pycparser==2.21
 pydantic==1.10.2
