@@ -5,3 +5,4 @@ pip install dhooks
 pip install loguru
 pip install httpx
 pip install ccxt
+pip install orjson
