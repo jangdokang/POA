@@ -86,7 +86,7 @@ class Bybit:
         except Exception as e:
             error = str(e)
             if "position idx not match position mode" in error:
-                raise Exception("create_order error: 포지션 모드가 일치하지 않습니다.")
+                raise Exception("create_order error: 포지션 모드를 원웨이모드로 변경하세요")
             else:
                 raise Exception("create_order error")
 
