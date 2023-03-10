@@ -6,3 +6,5 @@ pip install loguru
 pip install httpx
 pip install ccxt
 pip install orjson
+pip install pocketbase
+pip install pyjwt

@@ -10,6 +10,8 @@ env = "dev" if os.path.exists(f"{parent_directory}/dev.env") else "prod"
 crypto = ("BINANCE", "BITGET", "BYBIT", "UPBIT")
 stock = ("KRX", "NASDAQ", "NYSE", "AMEX")
 crypto_futures_code = ("PERP", ".P")
+QUOTE = Literal["KRW", "USDT", "USDTPERP", "BUSD", "BUSDPERP", "USDT.P", "USD"]
+CRYPTO = Literal["BINANCE", "BITGET", "BYBIT", "UPBIT"]
 
 
 class Settings(BaseSettings):
@@ -52,7 +54,7 @@ class OrderBase(BaseModel):
     password: str
     exchange: Literal["UPBIT", "BINANCE", "BYBIT", "BITGET", "KRX", "NASDAQ", "NYSE", "AMEX"]
     base: str
-    quote: Literal["KRW", "USDT", "USDTPERP", "BUSD", "BUSDPERP", "USDT.P", "USD"]
+    quote: QUOTE
     type: Literal["market", "limit"]
     side: Literal["buy", "sell", "entry/buy", "entry/sell", "close/buy", "close/sell"]
     amount: float | None = None
@@ -64,6 +66,7 @@ class OrderBase(BaseModel):
     profit_price: float | None = None
     order_name: str = "주문"
     kis_number: int | None = 1
+    hedge: str | None = None
     is_crypto: bool | None = None
     is_stock: bool | None = None
     is_futures: bool | None = None
@@ -81,6 +84,7 @@ class OrderBase(BaseModel):
         for key, value in values.items():
             if value in ("NaN", ""):
                 values[key] = None
+            # if value is string conver to upper
         if values["exchange"] in crypto:
             values["is_crypto"] = True
             if any([values["quote"].endswith(code) for code in crypto_futures_code]):
@@ -97,6 +101,28 @@ class MarketOrder(OrderBase):
 
 
 class PriceRequest(BaseModel):
-    exchange: Literal["UPBIT", "BINANCE", "BYBIT", "BITGET"]
+    exchange: CRYPTO
     base: str
-    quote: Literal["KRW", "USDT", "USDTPERP", "BUSD", "BUSDPERP", "USDT.P", "USD"]
+    quote: QUOTE
+
+class HedgeData(BaseModel):
+    password: str
+    exchange: Literal["BINANCE"]
+    base: str
+    quote: QUOTE = "USDTPERP"
+    amount: float | None = None
+    leverage: int | None = None
+    hedge: str
+    @ validator("password")
+    def password_validate(cls, v):
+        setting = Settings()
+        if v != setting.PASSWORD:
+            raise ValueError("비밀번호가 틀렸습니다")
+        return v
+    @ root_validator(pre=True)
+    def root_validate(cls, values):
+        for key, value in values.items():
+            if key in ("exchange", "base", "quote", "hedge"):
+                values[key] = value.upper()
+        return values
+        

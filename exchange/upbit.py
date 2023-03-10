@@ -24,6 +24,8 @@ class Upbit():
         # 비용주문
         symbol = f"{base}/{quote}"
         buy_amount = self.get_amount(base, quote, amount, buy_percent)
+        if price is None:
+            price = self.fetch_price(base, quote)
         return self.spot.create_order(symbol, type.lower(), side.lower(), buy_amount, price)
 
     async def market_buy_async(self, base: str, quote: str, type: str, side: str, amount: float, price: float = None, buy_percent: float = None):
@@ -83,3 +85,9 @@ class Upbit():
 
     def fetch_price(self, base: str, quote: str):
         return self.fetch_ticker(base, quote)["last"]
+    
+    def fetch_order(self, order_id: str):
+        return self.spot.fetch_order(order_id)
+    
+    def fetch_order_amount(self, order_id: str):
+        return self.fetch_order(order_id)["filled"]

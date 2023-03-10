@@ -49,7 +49,7 @@ def log_order_message(exchange_name, order_result: dict, order_info: MarketOrder
             elif exchange_name == "BITGET":
                 amount = str(order_info.amount*order_info.price)
             elif exchange_name == "BYBIT":
-                amount = str(order_result.get("info").get("origQty"))
+                amount = str(order_result.get("info").get("orderQty"))
         elif order_info.percent is not None:
             f_name = "비율"
             amount = f"{order_info.percent}%"
@@ -80,6 +80,8 @@ def log_order_message(exchange_name, order_result: dict, order_info: MarketOrder
         side = "롱 종료"
 
     if exchange_name in ("KRX", "NASDAQ", "NYSE", "AMEX"):
+        # order_info
+        # {'rt_cd': '0', 'msg_cd': 'APBK0013', 'msg1': '주문 전송 완료 되었습니다.', 'output': {'KRX_FWDG_ORD_ORGNO': '01790', 'ODNO': '0030580228', 'ORD_TMD': '024039'}}
         content = f"일시\n{date}\n\n거래소\n{exchange_name}\n\n티커\n{order_info.base}\n\n거래유형\n{side}\n\n{amount}"
         embed = Embed(title=order_info.order_name, description=f"체결 {exchange_name} {order_info.base} {side} {amount}", color=0x0000FF)
         embed.add_field(name="일시", value=str(date), inline=False)
@@ -92,14 +94,31 @@ def log_order_message(exchange_name, order_result: dict, order_info: MarketOrder
     else:
         content = f"일시\n{date}\n\n거래소\n{exchange_name}\n\n심볼\n{symbol}\n\n거래유형\n{order_result.get('side')}\n\n{amount}"
         embed = Embed(title=order_info.order_name, description=f"체결: {exchange_name} {symbol} {side} {amount}", color=0x0000FF)
-
         embed.add_field(name='일시', value=str(date), inline=False)
         embed.add_field(name='거래소', value=exchange_name, inline=False)
         embed.add_field(name='심볼', value=symbol, inline=False)
         embed.add_field(name='거래유형', value=side, inline=False)
         embed.add_field(name=f_name, value=amount, inline=False)
+        if order_result.get("price"):
+            embed.add_field(name='체결가', value=str(order_result.get("price")), inline=False)
         log_message(content, embed)
 
+def log_hedge_message(exchange, base, quote, exchange_amount, upbit_amount, hedge):
+    date = parse_time(datetime.utcnow().timestamp())
+    hedge_type =  "헷지" if hedge == "ON" else "헷지 종료"
+    content = f"{hedge_type}: {base} ==> {exchange}:{exchange_amount} UPBIT:{upbit_amount}"
+    embed = Embed(title="헷지", description=content, color=0x0000FF)
+    embed.add_field(name='일시', value=str(date), inline=False)
+    embed.add_field(name='거래소', value=f"{exchange}-UPBIT", inline=False)
+    embed.add_field(name='심볼', value=f"{base}/{quote}-{base}/KRW", inline=False)
+    embed.add_field(name='거래유형', value=hedge_type, inline=False)
+    embed.add_field(name='수량', value=f"{exchange}:{exchange_amount} UPBIT:{upbit_amount}", inline=False)
+    log_message(content, embed)
+
+def log_error_message(error, name):
+    embed = Embed(title=f"{name} 에러", description=f"[{name} 에러가 발생했습니다]\n{error}", color=0xFF0000)
+    logger.error(f"{name} [에러가 발생했습니다]\n{error}")
+    log_message(embed=embed)
 
 def log_order_error_message(error, order_info: MarketOrder):
     embed = Embed(

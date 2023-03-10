@@ -143,4 +143,8 @@ my_*
 my-*
 
 # db
+pocketbase.exe
 store.db
+pb_data/logs.db*
+pb_data/data.db-*
+pb_migrations/

@@ -32,17 +32,23 @@ class Binance:
         self.order_info: MarketOrder = None
 
     def parse_quote(self, quote: str):
-        if self.order_info.is_futures:
+        if self.order_info is None:
             return quote.replace("PERP", "")
         else:
-            return quote
+            if self.order_info.is_futures:
+                return quote.replace("PERP", "")
+            else:
+                return quote
 
     def parse_symbol(self, base: str, quote: str):
         quote = self.parse_quote(quote)
-        if self.order_info.is_futures:
-            return f"{base}/{quote}"
+        if self.order_info is None:
+            return f"{base}{quote}"
         else:
-            return f"{base}/{quote}"
+            if self.order_info.is_futures:
+                return f"{base}/{quote}"
+            else:
+                return f"{base}/{quote}"
 
     def parse_side(self, side: str):
         if side.startswith("entry/") or side.startswith("close/"):
@@ -94,6 +100,13 @@ class Binance:
         sell_amount = self.get_amount(base, quote, amount, sell_percent)
         return await self.market_order_async(base, quote, type, side, sell_amount)
 
+    def is_hedge_mode(self):
+        response = self.future.fapiPrivate_get_positionside_dual()
+        if response['dualSidePosition']:
+            return True
+        else:
+            return False        
+
     def market_entry(self, base: str, quote: str, type: str, side: str, amount: float, price: str = None, entry_percent: float = None, leverage: int = None):
         symbol = self.parse_symbol(base, quote)
         side = self.parse_side(side)
@@ -101,7 +114,25 @@ class Binance:
         entry_amount = self.get_amount(base, quote, amount, entry_percent)
         if leverage is not None:
             self.set_leverage(leverage, symbol)
-        return self.future.create_order(symbol, type.lower(), side, abs(entry_amount))
+        try:
+            return self.future.create_order(symbol, type.lower(), side, abs(entry_amount))
+        except Exception as e:
+            if "position side does not match" in str(e):
+                if side == "buy":
+                    positionSide = "LONG"
+                elif side == "sell":
+                    positionSide = "SHORT"
+                return self.future.create_order(symbol, type.lower(), side, abs(entry_amount), params={'positionSide': positionSide})
+            else:
+                raise Exception("진입 실패")
+
+                
+
+    def market_long_entry(self, base: str, quote: str, amount: float, price:str =None, entry_percent: float = None, leverage: int = None):
+        return self.market_entry(base, quote, "market", "entry/buy", amount, price, entry_percent, leverage)
+    
+    def market_short_entry(self, base: str, quote: str, amount: float, price:str =None, entry_percent: float = None, leverage: int = None):
+        return self.market_entry(base, quote, "market", "entry/sell", amount, price, entry_percent, leverage)
 
     # def market_stop_order(self, base: str, quote: str, type: str, side: str, amount: float, price: float, stop_price: float):
     #     symbol = f"{base}/{quote}"
@@ -143,7 +174,24 @@ class Binance:
         side = self.parse_side(side)
         quote = self.parse_quote(quote)
         close_amount = self.get_amount(base, quote, amount, close_percent)
-        return self.future.create_order(symbol, type.lower(), side, close_amount, params={"reduceOnly": True})
+        try:
+            return self.future.create_order(symbol, type.lower(), side, close_amount, params={"reduceOnly": True})
+        except Exception as e:
+            if "position side does not match" in str(e):
+                if side == "buy":
+                    positionSide = "SHORT"
+                elif side == "sell":
+                    positionSide = "LONG"
+                return self.future.create_order(symbol, type.lower(), side, close_amount, params={'positionSide': positionSide})
+            else:
+                raise Exception("종료 실패")
+
+    
+    def market_long_close(self, base: str, quote: str, amount: float = None, price: str = None, close_percent: str = None):
+        return self.market_close(base, quote, "market", "close/sell", amount, price, close_percent)
+
+    def market_short_close(self, base: str, quote: str, amount: float = None, price: str = None, close_percent: str = None):
+        return self.market_close(base, quote, "market", "close/buy", amount, price, close_percent)
 
     async def market_close_async(self, base: str, quote: str, type: str, side: str, amount: float = None, price: str = None, close_percent: str = None):
         symbol = self.parse_symbol(base, quote)

@@ -1,6 +1,6 @@
 from exchange.pexchange import ccxt
 from model import MarketOrder
-
+import time
 
 class Bybit:
     def __init__(self, key, secret):
@@ -61,13 +61,30 @@ class Bybit:
             raise Exception("amount와 percent 중 하나는 입력해야 합니다")
         return result
 
+    def get_order_amount(self, order_id: str, parsed_symbol: str):
+        order_amount = None
+        for i in range(8):
+            try:
+                if self.order_info.is_futures:
+                    order_result = self.future.fetch_order(order_id, parsed_symbol)
+                else:
+                    order_result = self.spot.fetch_order(order_id)
+                order_amount = order_result["amount"]
+            except Exception as e:
+                print("...")
+                time.sleep(0.5)
+        return order_amount
+
     def market_order(self, base: str, quote: str, type: str, side: str, amount: float, price: float = None):
         symbol = self.parse_symbol(base, quote)
-        return self.spot.create_order(symbol, type.lower(), side.lower(), amount, price)
+        order_result = self.spot.create_order(symbol, type.lower(), side.lower(), amount, price)
+        return order_result
 
     def market_buy(self, base: str, quote: str, type: str, side: str, amount: float, price: float = None, buy_percent: float = None):
         # 비용주문
         buy_amount = self.get_amount(base, quote, amount, buy_percent)
+        if price is None:
+            price = self.fetch_price(base, quote)
         return self.market_order(base, quote, type, side, buy_amount, price)
 
     def market_sell(self, base: str, quote: str, type: str, side: str, amount: float = None, price: float = None, sell_percent: str = None):
@@ -82,11 +99,24 @@ class Bybit:
         if leverage is not None:
             self.set_leverage(leverage, symbol)
         try:
-            return self.future.create_order(symbol, type.lower(), side, abs(entry_amount), params={"position_idx": 0})
+            order_result = self.future.create_order(symbol, type.lower(), side, abs(entry_amount), params={"position_idx": 0})
+            order_amount = self.get_order_amount(order_result["id"], symbol)
+            order_result["amount"] = order_amount
+            return order_result
         except Exception as e:
             error = str(e)
             if "position idx not match position mode" in error:
-                raise Exception("create_order error: 포지션 모드를 원웨이모드로 변경하세요")
+                position_idx = None
+                if side == "buy":
+                    position_idx = 1
+                elif side == "sell":
+                    position_idx = 2
+                if position_idx is None:
+                    raise Exception("position_idx error")
+                order_result = self.future.create_order(symbol, type.lower(), side, abs(entry_amount), params={"position_idx": position_idx})
+                order_amount = self.get_order_amount(order_result["id"], symbol)
+                order_result["amount"] = order_amount
+                return order_result
             else:
                 raise Exception("create_order error")
 
@@ -95,7 +125,26 @@ class Bybit:
         quote = self.parse_quote(quote)
         side = self.parse_side(side)
         close_amount = self.get_amount(base, quote, amount, close_percent)
-        return self.future.create_order(symbol, type.lower(), side, close_amount, params={"reduceOnly": True, "position_idx": 0})
+        try:
+            order_result = self.future.create_order(symbol, type.lower(), side, close_amount, params={"reduceOnly": True, "position_idx": 0})
+            order_amount = self.get_order_amount(order_result["id"], symbol)
+            order_result["amount"] = order_amount
+            return order_result
+        except Exception as e:
+            error = str(e)
+            if "position idx not match position mode" in error:
+                position_idx = None
+                if side == "buy":
+                    position_idx = 2
+                elif side == "sell":
+                    position_idx = 1
+                if position_idx is None:
+                    raise Exception("position_idx error")
+                order_result = self.future.create_order(symbol, type.lower(), side, abs(close_amount), params={"reduceOnly": True,"positionIdx": position_idx})
+                order_amount = self.get_order_amount(order_result["id"], symbol)
+                order_result["amount"] = order_amount
+                return order_result
+
 
     def get_balance(self, base: str):
         balance = self.future.fetch_free_balance().get(base) if self.order_info.is_crypto and self.order_info.is_futures else self.spot.fetch_free_balance().get(base)

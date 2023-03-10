@@ -54,6 +54,9 @@ class Bitget:
     def market_buy(self, base: str, quote: str, type: str, side: str, amount: float, price: float = None, buy_percent: float = None):
         # 비용주문
         buy_amount = self.get_amount(base, quote, amount, buy_percent)
+        if price is None:
+            price = self.fetch_price(base, quote)
+            self.order_info.price = price
         return self.market_order(base, quote, type, side, buy_amount, price)
 
     def market_sell(self, base: str, quote: str, type: str, side: str, amount: float, price: float = None, sell_percent: str = None):
@@ -61,6 +64,7 @@ class Bitget:
         sell_amount = self.get_amount(base, quote, amount, sell_percent)
         result = self.market_order(base, quote, type, side, sell_amount)
         return result
+    
 
     def market_entry(self, base: str, quote: str, type: str, side: str, amount: float, price: float = None,  entry_percent: float = None, leverage=None):
         symbol = self.parse_symbol(base, quote)
@@ -69,20 +73,35 @@ class Bitget:
         entry_amount = self.get_amount(base, quote, amount, entry_percent)
         if leverage is not None:
             self.set_leverage(leverage, symbol, side)
-        return self.future.create_order(symbol, type.lower(), side, abs(entry_amount))
+        try:
+            return self.future.create_order(symbol, type.lower(), side, abs(entry_amount))
+        except Exception as e:
+            if  "unilateral position" in str(e):
+                # POST /api/mix/v1/account/setPositionMode
+                # self.future.privateMixPostAccountSetPositionMode({"productType": "umcbl", "holdMode": "single_hold"})
+                return self.future.create_order(symbol, type.lower(), side+"_single", abs(entry_amount), params={"side": side+"_single"})
+                
+            else:
+                raise Exception("주문 실패")
+            
 
     def market_close(self, base: str, quote: str, type: str, side: str, amount: float, price: float = None, close_percent: str = None):
         symbol = self.parse_symbol(base, quote)
         quote = self.parse_quote(quote)
         side = self.parse_side(side)
-
         close_amount = self.get_amount(base, quote, amount, close_percent)
-        return self.future.create_order(symbol, type.lower(), side, close_amount, params={"reduceOnly": True})
+        try:
+            return self.future.create_order(symbol, type.lower(), side, close_amount, params={"reduceOnly": True})
+        except Exception as e:
+            if "two-way positions" in str(e):
+                return self.future.create_order(symbol, type.lower(), side+"_single", close_amount, params={"reduceOnly": True, "side": side+"_single"})
+            else:
+                raise Exception("종료 실패")
 
-    def set_leverage(self, leverage, symbol, side):
-        if side == "entry/buy":
+    def set_leverage(self, leverage, symbol, parsed_side):
+        if parsed_side == "buy":
             hold_side = "long"
-        elif side == "entry/sell":
+        elif parsed_side == "sell":
             hold_side = "short"
         market = self.future.market(symbol)
         request = {
@@ -116,7 +135,6 @@ class Bitget:
                 cash = self.get_futures_balance(quote) * percent/100 if self.order_info.is_crypto and self.order_info.is_futures else self.get_spot_balance(quote) * percent/100
                 current_price = self.fetch_price(base, quote)
                 result = cash / current_price
-                print(result, cash)
             elif self.order_info.side in ("sell", "close/buy", "close/sell"):
                 symbol = self.parse_symbol(base, quote)
                 free_amount = self.get_futures_position(symbol) if self.order_info.is_crypto and self.order_info.is_futures else self.get_spot_balance(base)
@@ -139,8 +157,12 @@ class Bitget:
 
     def get_futures_position(self, symbol):
         position = self.future.fetch_position(symbol)
+        
         if position:
-            contracts = float(position["info"]["available"])
+            if isinstance(position, list):
+                contracts = float(position[0]["info"]["available"])
+            else:
+                contracts = float(position["info"]["available"])
             if contracts == 0:
                 raise Exception("포지션이 없습니다")
             else:

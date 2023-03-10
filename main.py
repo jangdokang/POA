@@ -1,21 +1,20 @@
-# version 0.0.4
+# version 0.0.5
 from fastapi.exception_handlers import (
     request_validation_exception_handler,
 )
-
+from pprint import pprint
 from fastapi import FastAPI, Request, status, BackgroundTasks
-from fastapi.responses import ORJSONResponse
+from fastapi.responses import ORJSONResponse, RedirectResponse
 from fastapi.exceptions import RequestValidationError
 import httpx
 from exchange.stock.kis import KoreaInvestment
-from model import MarketOrder, PriceRequest
-from utility import settings, log_order_message, log_alert_message, print_alert_message, logger_test, log_order_error_message, log_validation_error_message
+from model import MarketOrder, PriceRequest, HedgeData
+from utility import settings, log_order_message, log_alert_message, print_alert_message, logger_test, log_order_error_message, log_validation_error_message, log_hedge_message, log_error_message
 import traceback
-from exchange import get_exchange, log_message, db, settings
+from exchange import get_exchange, log_message, db, settings, get_bot, pocket
 
 
 app = FastAPI(default_response_class=ORJSONResponse)
-
 
 @app.on_event("startup")
 async def startup():
@@ -41,13 +40,26 @@ whitelist = whitelist + settings.WHITELIST
 
 
 @app.middleware('http')
-async def settings_whitelist_middleware(request: Request, call_next):
-    if request.client.host not in whitelist:
-        msg = f"{request.client.host}는 안됩니다"
-        print(msg)
-        return ORJSONResponse(status_code=status.HTTP_403_FORBIDDEN, content=f"{request.client.host} Not Allowed")
-    response = await call_next(request)
-    return response
+async def whitelist_middleware(request: Request, call_next):
+    try:
+        if request.client.host not in whitelist:
+            msg = f"{request.client.host}는 안됩니다"
+            print(msg)
+            return ORJSONResponse(status_code=status.HTTP_403_FORBIDDEN, content=f"{request.client.host} Not Allowed")
+        # elif request.url.path == "/order" and request.method == "POST":
+        #     request_json  = await request.json()
+        #     if "hedge" in request_json:
+        #         async with httpx.AsyncClient() as client:
+        #             port = app.state.port
+        #             await client.post(f"http://127.0.0.1:{port}/hedge", json=(await request.json()))
+        #             return ORJSONResponse(status_code=status.HTTP_200_OK, content="OK")
+    except:
+        log_error_message(traceback.format_exc(), "미들웨어 에러")
+    else:
+        pass
+    finally:
+        response = await call_next(request)
+        return response
 
 
 @app.exception_handler(RequestValidationError)
@@ -64,9 +76,8 @@ async def validation_exception_handler(request, exc):
 
 @app.get("/ip")
 async def get_ip():
-    data = httpx.get("https://ifconfig.me").text
+    data = httpx.get("https://ipv4.jsonip.com").json()["ip"]
     log_message(data)
-    return data
 
 
 @ app.get("/hi")
@@ -125,3 +136,76 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
 
     finally:
         pass
+
+
+@ app.post("/hedge")
+async def hedge(hedge_data: HedgeData, background_tasks: BackgroundTasks):
+    exchange_name = hedge_data.exchange.upper()
+    bot = get_bot(exchange_name)
+    upbit = get_bot("UPBIT")
+    
+    base = hedge_data.base
+    quote = hedge_data.quote
+    amount = hedge_data.amount
+    leverage = hedge_data.leverage
+    hedge = hedge_data.hedge
+
+    if hedge == "ON":
+        try:
+            if amount is None:
+                raise Exception("헷지할 수량을 요청하세요")
+            binance_order_result = bot.market_short_entry(base, quote, amount, None, None, leverage=leverage)
+            binance_order_amount = binance_order_result["amount"]
+            pocket.create("kimp", {"exchange": "BINANCE", "base": base, "quote": quote, "amount": binance_order_amount})
+            if leverage is None:
+                leverage = 1
+            upbit_order_result = upbit.market_buy(base, "KRW", "market", "buy", binance_order_amount/leverage)
+            upbit_order_info = upbit.fetch_order(upbit_order_result["id"])
+            upbit_order_amount = upbit_order_info["filled"]
+            pocket.create("kimp", {"exchange": "UPBIT", "base": base, "quote": "KRW", "amount": upbit_order_amount})
+            log_hedge_message(exchange_name, base, quote, binance_order_amount, upbit_order_amount, hedge)
+
+        except Exception as e:
+            # log_message(f"{e}")
+            background_tasks.add_task(log_error_message, traceback.format_exc(), "헷지 에러")
+            return {"result":"error"}
+        else:
+            return {"result":"success"}
+
+    elif hedge == "OFF":
+        try:
+            records = pocket.get_full_list("kimp", query_params={"filter": f'base = "{base}"'})
+            binance_amount = 0.0
+            binance_records_id = []
+            upbit_amount = 0.0
+            upbit_records_id = []
+            for record in records:
+                if record.exchange == "BINANCE":
+                    binance_amount += record.amount
+                    binance_records_id.append(record.id)
+                elif record.exchange == "UPBIT":
+                    upbit_amount += record.amount
+                    upbit_records_id.append(record.id)
+            
+            if binance_amount > 0 and upbit_amount > 0:
+                # 바이낸스
+                binance_order_result = bot.market_short_close(base, quote, binance_amount, None, None)
+                for binance_record_id in binance_records_id:
+                    pocket.delete("kimp", binance_record_id)
+                # 업비트
+                upbit_order_result = upbit.market_sell(base, "KRW", "market", "sell", upbit_amount)
+                for upbit_record_id in upbit_records_id:
+                    pocket.delete("kimp", upbit_record_id)
+                
+                log_hedge_message(exchange_name, base, quote, binance_amount, upbit_amount, hedge)
+            elif binance_amount == 0 and upbit_amount == 0:
+                log_message(f"{exchange_name}, UPBIT에 종료할 수량이 없습니다")
+            elif binance_amount == 0:
+                log_message(f"{exchange_name}에 종료할 수량이 없습니다")
+            elif upbit_amount == 0:
+                log_message("UPBIT에 종료할 수량이 없습니다")
+        except Exception as e:
+            background_tasks.add_task(log_error_message, traceback.format_exc(), "헷지종료 에러")
+            return {"result":"error"}
+        else:
+            return {"result":"success"}

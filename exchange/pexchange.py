@@ -54,6 +54,9 @@ def get_exchange(exchange_name, kis_number=None):
         # print(payload, _kis, id(payload[_kis]))
         return kis
 
+def get_bot(exchange_name, kis_number=None):
+    return get_exchange(exchange_name, kis_number).dict()[exchange_name]
+
 
 def check_key(exchange_name):
     settings_dict = settings.dict()
@@ -77,7 +80,6 @@ def check_key(exchange_name):
         secret = settings_dict.get(f"{exchange_name}_SECRET")
         account_number = settings_dict.get(f"{exchange_name}_ACCOUNT_NUMBER")
         account_code = settings_dict.get(f"{exchange_name}_ACCOUNT_CODE")
-        print("env파일:", key, secret, account_number, account_code)
         if key and secret and account_number and account_code:
             return key, secret, account_number, account_code
         else:
