@@ -44,7 +44,7 @@ async def whitelist_middleware(request: Request, call_next):
         if request.client.host not in whitelist:
             msg = f"{request.client.host}는 안됩니다"
             print(msg)
-            return ORJSONResponse(status_code=status.HTTP_403_FORBIDDEN, content=f"{request.client.host} Not Allowed")
+            return ORJSONResponse(status_code=status.HTTP_403_FORBIDDEN, content=f"{request.client.host}는 허용되지 않습니다")
         # elif request.url.path == "/order" and request.method == "POST":
         #     request_json  = await request.json()
         #     if "hedge" in request_json:
@@ -55,10 +55,9 @@ async def whitelist_middleware(request: Request, call_next):
     except:
         log_error_message(traceback.format_exc(), "미들웨어 에러")
     else:
-        pass
-    finally:
         response = await call_next(request)
         return response
+        
 
 
 @app.exception_handler(RequestValidationError)
