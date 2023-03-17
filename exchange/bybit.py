@@ -1,3 +1,4 @@
+from pprint import pprint
 from exchange.pexchange import ccxt
 from model import MarketOrder
 import time
@@ -163,12 +164,26 @@ class Bybit:
         return self.fetch_ticker(base, quote)["last"]
 
     def get_futures_position(self, symbol):
-        position = self.future.fetch_positions(symbols=[symbol])
-        if position:
-            balance = position[0].get("contracts")
-            if balance is None or balance == 0:
-                raise Exception("거래할 수량이 없습니다")
-            return balance
+        positions = self.future.fetch_positions(symbols=[symbol])
+        long_contracts = None
+        short_contracts = None
+        if positions:
+            for position in positions:
+                if position["side"] == "long":
+                    long_contracts = position["contracts"]
+                elif position["side"] == "short":
+                    short_contracts = position["contracts"]
+
+            if self.order_info.side == "close/buy":
+                if not short_contracts:
+                    raise Exception("숏 포지션이 없습니다")
+                else:
+                    return short_contracts
+            elif self.order_info.side == "close/sell":
+                if not long_contracts:
+                    raise Exception("롱 포지션이 없습니다")
+                else:
+                    return long_contracts
         else:
             raise Exception("거래할 수량이 없습니다")
 

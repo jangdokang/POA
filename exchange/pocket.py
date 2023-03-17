@@ -1,15 +1,16 @@
 from pocketbase import PocketBase
 import jwt
-from utility import log_message, log_error_message
+from utility import log_message, log_error_message, settings
 import time
 import traceback
-
 pb = PocketBase('http://127.0.0.1:8090')
 
 def auth():
   try:
-    pb.admins.auth_with_password("poa@admin.com", "poabot!@#$")
-  except Exception:
+    DB_ID = settings.DB_ID
+    DB_PASSWORD = settings.DB_PASSWORD 
+    pb.admins.auth_with_password(DB_ID, DB_PASSWORD)
+  except Exception as e:
     raise Exception("DB auth error")
 
 def reauth():

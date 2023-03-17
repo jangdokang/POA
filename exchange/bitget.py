@@ -1,3 +1,4 @@
+from pprint import pprint
 from exchange.pexchange import ccxt
 from exchange.database import db
 from model import MarketOrder
@@ -156,17 +157,33 @@ class Bitget:
         return balance
 
     def get_futures_position(self, symbol):
-        position = self.future.fetch_position(symbol)
-        
-        if position:
-            if isinstance(position, list):
-                contracts = float(position[0]["info"]["available"])
+        positions = self.future.fetch_position(symbol)
+        long_contracts = None
+        short_contracts = None
+
+        if positions:
+            if isinstance(positions, list):
+                for position in positions:
+                    if position["side"] == "long":
+                        long_contracts = float(position["info"]["available"])
+                    elif position["side"] == "short":
+                        short_contracts = float(position["info"]["available"])
+                if self.order_info.side == "close/buy":
+                    if not short_contracts:
+                        raise Exception("숏 포지션이 없습니다")
+                    else:
+                        return short_contracts
+                elif self.order_info.side == "close/sell":
+                    if not long_contracts:
+                        raise Exception("롱 포지션이 없습니다")
+                    else:
+                        return long_contracts
             else:
-                contracts = float(position["info"]["available"])
-            if contracts == 0:
-                raise Exception("포지션이 없습니다")
-            else:
-                return contracts
+                contracts = float(positions["info"]["available"])
+                if contracts == 0:
+                    raise Exception("포지션이 없습니다")
+                else:
+                    return contracts
         else:
             raise Exception("포지션이 없습니다")
 

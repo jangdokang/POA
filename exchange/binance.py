@@ -1,6 +1,6 @@
 from .pexchange import ccxt, ccxt_async, httpx
 from model import MarketOrder
-
+from pprint import pprint
 
 class Binance:
     def __init__(self, key, secret):
@@ -220,14 +220,28 @@ class Binance:
         return balance
 
     def get_futures_position(self, symbol):
-        position = self.future.fetch_positions_risk(symbols=[symbol])
-        if position:
-            balance = position[0].get("contracts")
-            if balance is None or balance == 0:
-                raise Exception("거래할 수량이 없습니다")
-            return balance
+        positions = self.future.fetch_positions_risk(symbols=[symbol])
+        long_contracts = None
+        short_contracts = None
+        if positions:
+            for position in positions:
+                if position["side"] == "long":
+                    long_contracts = position["contracts"]
+                elif position["side"] == "short":
+                    short_contracts = position["contracts"]
+
+            if self.order_info.side == "close/buy":
+                if not short_contracts:
+                    raise Exception("숏 포지션이 없습니다")
+                else:
+                    return short_contracts
+            elif self.order_info.side == "close/sell":
+                if not long_contracts:
+                    raise Exception("롱 포지션이 없습니다")
+                else:
+                    return long_contracts
         else:
-            raise Exception("거래할 수량이 없습니다")
+            raise Exception("포지션이 없습니다")
 
     def get_listen_key(self):
         url = 'https://fapi.binance.com/fapi/v1/listenKey'

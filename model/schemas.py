@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     KIS4_ACCOUNT_CODE: str | None = None
     KIS4_KEY: str | None = None
     KIS4_SECRET: str | None = None
+    DB_ID: str  = "poa@admin.com"
+    DB_PASSWORD: str = "poabot!@#$"
 
     class Config:
         env_file = f'{parent_directory}/.env' if env == "prod" else f'{parent_directory}/dev.env'

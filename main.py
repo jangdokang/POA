@@ -1,4 +1,3 @@
-# version 0.0.5
 from fastapi.exception_handlers import (
     request_validation_exception_handler,
 )
@@ -9,16 +8,16 @@ from fastapi.exceptions import RequestValidationError
 import httpx
 from exchange.stock.kis import KoreaInvestment
 from model import MarketOrder, PriceRequest, HedgeData
-from utility import settings, log_order_message, log_alert_message, print_alert_message, logger_test, log_order_error_message, log_validation_error_message, log_hedge_message, log_error_message
+from utility import settings, log_order_message, log_alert_message, print_alert_message, logger_test, log_order_error_message, log_validation_error_message, log_hedge_message, log_error_message, log_message
 import traceback
 from exchange import get_exchange, log_message, db, settings, get_bot, pocket
 
-
+VERSION = "0.0.6"
 app = FastAPI(default_response_class=ORJSONResponse)
 
 @app.on_event("startup")
 async def startup():
-    pass
+    log_message(f"POABOT 실행 완료! - 버전:{VERSION}")
 
 
 @app.on_event("shutdown")
