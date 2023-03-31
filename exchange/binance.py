@@ -33,10 +33,10 @@ class Binance:
 
     def parse_quote(self, quote: str):
         if self.order_info is None:
-            return quote.replace("PERP", "")
+            return quote.replace(".P", "")
         else:
             if self.order_info.is_futures:
-                return quote.replace("PERP", "")
+                return quote.replace(".P", "")
             else:
                 return quote
 

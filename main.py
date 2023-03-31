@@ -12,7 +12,7 @@ from utility import settings, log_order_message, log_alert_message, print_alert_
 import traceback
 from exchange import get_exchange, log_message, db, settings, get_bot, pocket
 
-VERSION = "0.0.6"
+VERSION = "0.0.7"
 app = FastAPI(default_response_class=ORJSONResponse)
 
 @app.on_event("startup")
