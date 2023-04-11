@@ -10,7 +10,7 @@ env = "dev" if os.path.exists(f"{parent_directory}/dev.env") else "prod"
 crypto = ("BINANCE", "BITGET", "BYBIT", "UPBIT")
 stock = ("KRX", "NASDAQ", "NYSE", "AMEX")
 crypto_futures_code = ("PERP", ".P")
-QUOTE = Literal["KRW", "USDT", "USDTPERP", "BUSD", "BUSDPERP", "USDT.P", "USD"]
+QUOTE = Literal["KRW", "USDT", "USDTPERP", "BUSD", "BUSDPERP", "USDT.P", "USD", "BUSD.P"]
 CRYPTO = Literal["BINANCE", "BITGET", "BYBIT", "UPBIT"]
 
 
@@ -111,7 +111,7 @@ class HedgeData(BaseModel):
     password: str
     exchange: Literal["BINANCE"]
     base: str
-    quote: QUOTE = "USDTPERP"
+    quote: QUOTE = "USDT.P"
     amount: float | None = None
     leverage: int | None = None
     hedge: str

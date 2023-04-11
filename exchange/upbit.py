@@ -71,6 +71,8 @@ class Upbit():
                 result = cash / current_price
             elif self.order_info.side in ("sell"):
                 free_amount = self.get_balance(base)
+                if free_amount is None:
+                    raise Exception("매도할 수량이 없습니다")
                 result = free_amount * float(percent)/100
         else:
             raise Exception("amount와 percent 중 하나는 입력해야 합니다!")

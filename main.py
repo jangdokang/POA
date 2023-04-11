@@ -12,7 +12,7 @@ from utility import settings, log_order_message, log_alert_message, print_alert_
 import traceback
 from exchange import get_exchange, log_message, db, settings, get_bot, pocket
 
-VERSION = "0.0.7"
+VERSION = "0.0.8"
 app = FastAPI(default_response_class=ORJSONResponse)
 
 @app.on_event("startup")
@@ -135,6 +135,23 @@ async def order(order_info: MarketOrder, background_tasks: BackgroundTasks):
     finally:
         pass
 
+def get_hedge_records(base):
+    records = pocket.get_full_list("kimp", query_params={"filter": f'base = "{base}"'})
+    binance_amount = 0.0
+    binance_records_id = []
+    upbit_amount = 0.0
+    upbit_records_id = []
+    for record in records:
+        if record.exchange == "BINANCE":
+            binance_amount += record.amount
+            binance_records_id.append(record.id)
+        elif record.exchange == "UPBIT":
+            upbit_amount += record.amount
+            upbit_records_id.append(record.id)
+    
+    return {"BINANCE": {"amount": binance_amount, "records_id": binance_records_id}, "UPBIT": {"amount": upbit_amount, "records_id": upbit_records_id}}
+    
+
 
 @ app.post("/hedge")
 async def hedge(hedge_data: HedgeData, background_tasks: BackgroundTasks):
@@ -157,11 +174,21 @@ async def hedge(hedge_data: HedgeData, background_tasks: BackgroundTasks):
             pocket.create("kimp", {"exchange": "BINANCE", "base": base, "quote": quote, "amount": binance_order_amount})
             if leverage is None:
                 leverage = 1
-            upbit_order_result = upbit.market_buy(base, "KRW", "market", "buy", binance_order_amount/leverage)
-            upbit_order_info = upbit.fetch_order(upbit_order_result["id"])
-            upbit_order_amount = upbit_order_info["filled"]
-            pocket.create("kimp", {"exchange": "UPBIT", "base": base, "quote": "KRW", "amount": upbit_order_amount})
-            log_hedge_message(exchange_name, base, quote, binance_order_amount, upbit_order_amount, hedge)
+            try:
+                upbit_order_result = upbit.market_buy(base, "KRW", "market", "buy", binance_order_amount/leverage)
+            except:
+                hedge_records = get_hedge_records(base)
+                binance_records_id = hedge_records["BINANCE"]["records_id"]
+                binance_amount = hedge_records["BINANCE"]["amount"]
+                binance_order_result = bot.market_short_close(base, quote, binance_amount, None, None)
+                for binance_record_id in binance_records_id:
+                    pocket.delete("kimp", binance_record_id)
+                log_message("[헷지 실패] 업비트에서 에러가 발생하여 바이낸스 포지션을 종료합니다")
+            else:
+                upbit_order_info = upbit.fetch_order(upbit_order_result["id"])
+                upbit_order_amount = upbit_order_info["filled"]
+                pocket.create("kimp", {"exchange": "UPBIT", "base": base, "quote": "KRW", "amount": upbit_order_amount})
+                log_hedge_message(exchange_name, base, quote, binance_order_amount, upbit_order_amount, hedge)
 
         except Exception as e:
             # log_message(f"{e}")
