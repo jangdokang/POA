@@ -12,7 +12,7 @@ from utility import settings, log_order_message, log_alert_message, print_alert_
 import traceback
 from exchange import get_exchange, log_message, db, settings, get_bot, pocket
 
-VERSION = "0.0.8"
+VERSION = "0.0.9"
 app = FastAPI(default_response_class=ORJSONResponse)
 
 @app.on_event("startup")
@@ -175,15 +175,15 @@ async def hedge(hedge_data: HedgeData, background_tasks: BackgroundTasks):
             if leverage is None:
                 leverage = 1
             try:
-                upbit_order_result = upbit.market_buy(base, "KRW", "market", "buy", binance_order_amount/leverage)
-            except:
+                upbit_order_result = upbit.market_buy(base, "KRW", "market", "buy", binance_order_amount)
+            except Exception as e:
                 hedge_records = get_hedge_records(base)
                 binance_records_id = hedge_records["BINANCE"]["records_id"]
                 binance_amount = hedge_records["BINANCE"]["amount"]
                 binance_order_result = bot.market_short_close(base, quote, binance_amount, None, None)
                 for binance_record_id in binance_records_id:
                     pocket.delete("kimp", binance_record_id)
-                log_message("[헷지 실패] 업비트에서 에러가 발생하여 바이낸스 포지션을 종료합니다")
+                log_message("[헷지 실패] 업비트에서 에러가 발생하여 바이낸스 포지션을 종료합니다", str(e))
             else:
                 upbit_order_info = upbit.fetch_order(upbit_order_result["id"])
                 upbit_order_amount = upbit_order_info["filled"]
