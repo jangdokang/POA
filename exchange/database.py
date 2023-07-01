@@ -5,9 +5,6 @@ from pathlib import Path
 
 current_file_direcotry = os.path.dirname(os.path.realpath(__file__))
 parent_directory = Path(current_file_direcotry).parent
-# print(current_file_direcotry)
-# print(parent_directory)
-
 
 class Database:
     def __new__(cls, *args, **kwargs):

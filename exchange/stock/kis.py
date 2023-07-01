@@ -7,12 +7,12 @@ from exchange.database import db
 from pydantic import validate_arguments
 import traceback
 import copy
+from exchange.model import MarketOrder
+from devtools import debug
 
 
 class KoreaInvestment:
-
     def __init__(self, key: str, secret: str, account_number: str, account_code: str, kis_number: int):
-
         self.key = key
         self.secret = secret
         self.kis_number = kis_number
@@ -27,7 +27,14 @@ class KoreaInvestment:
         self.base_body = {}
         self.base_order_body = AccountInfo(CANO=account_number, ACNT_PRDT_CD=account_code)
         self.order_exchange_code = {"NASDAQ": ExchangeCode.NASDAQ, "NYSE": ExchangeCode.NYSE, "AMEX": ExchangeCode.AMEX}
-        self.query_exchange_code = {"NASDAQ": QueryExchangeCode.NASDAQ, "NYSE": QueryExchangeCode.NYSE, "AMEX": QueryExchangeCode.AMEX}
+        self.query_exchange_code = {
+            "NASDAQ": QueryExchangeCode.NASDAQ,
+            "NYSE": QueryExchangeCode.NYSE,
+            "AMEX": QueryExchangeCode.AMEX,
+        }
+
+    def init_info(self, order_info: MarketOrder):
+        self.order_info = order_info
 
     def close_session(self):
         self.session.close()
@@ -69,25 +76,24 @@ class KoreaInvestment:
                 return False
             else:
                 if not self.is_auth:
-                    response = self.session.get("https://openapi.koreainvestment.com:9443/uapi/domestic-stock/v1/quotations/inquire-ccnl",
-                                                headers={
-                                                    "authorization": f"BEARER {access_token}",
-                                                    "appkey": key,
-                                                    "appsecret": secret,
-                                                    "custtype": "P",
-                                                    "tr_id": "FHKST01010300"
-                                                },
-                                                params={
-                                                    "FID_COND_MRKT_DIV_CODE": "J",
-                                                    "FID_INPUT_ISCD": "005930"
-                                                }).json()
+                    response = self.session.get(
+                        "https://openapi.koreainvestment.com:9443/uapi/domestic-stock/v1/quotations/inquire-ccnl",
+                        headers={
+                            "authorization": f"BEARER {access_token}",
+                            "appkey": key,
+                            "appsecret": secret,
+                            "custtype": "P",
+                            "tr_id": "FHKST01010300",
+                        },
+                        params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": "005930"},
+                    ).json()
                     if response["msg_cd"] == "EGW00123":
                         return False
 
             access_token_token_expired = datetime.strptime(access_token_token_expired, "%Y-%m-%d %H:%M:%S")
-            diff = access_token_token_expired-datetime.now()
+            diff = access_token_token_expired - datetime.now()
             total_seconds = diff.total_seconds()
-            if total_seconds < 60*60:
+            if total_seconds < 60 * 60:
                 return False
             else:
                 return True
@@ -96,11 +102,7 @@ class KoreaInvestment:
             print(traceback.format_exc())
 
     def create_auth(self, key: str, secret: str):
-        data = {
-            "grant_type": "client_credentials",
-            "appkey": key,
-            "appsecret": secret
-        }
+        data = {"grant_type": "client_credentials", "appkey": key, "appsecret": secret}
         base_url = BaseUrls.base_url.value
         endpoint = "/oauth2/tokenP"
 
@@ -121,15 +123,22 @@ class KoreaInvestment:
         else:
             self.is_auth = True
         access_token = auth[0]
-        self.base_headers = BaseHeaders(authorization=f"Bearer {access_token}", appkey=self.key, appsecret=self.secret, custtype="P").dict()
+        self.base_headers = BaseHeaders(
+            authorization=f"Bearer {access_token}", appkey=self.key, appsecret=self.secret, custtype="P"
+        ).dict()
         return auth
 
     @validate_arguments
     def create_order(
-            self, exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
-            ticker: str, order_type: Literal["limit", "market"],
-            side: Literal["buy", "sell"],
-            amount: int, price: int = 0, mintick=0.01):
+        self,
+        exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
+        ticker: str,
+        order_type: Literal["limit", "market"],
+        side: Literal["buy", "sell"],
+        amount: int,
+        price: int = 0,
+        mintick=0.01,
+    ):
         endpoint = Endpoints.korea_order.value if exchange == "KRX" else Endpoints.usa_order.value
         body = self.base_order_body.dict()
         headers = copy.deepcopy(self.base_headers)
@@ -141,16 +150,20 @@ class KoreaInvestment:
             if self.base_url == BaseUrls.base_url:
                 headers |= KoreaBuyOrderHeaders(**headers) if side == "buy" else KoreaSellOrderHeaders(**headers)
             elif self.base_url == BaseUrls.paper_base_url:
-                headers |= KoreaPaperBuyOrderHeaders(**headers) if side == "buy" else KoreaPaperSellOrderHeaders(**headers)
+                headers |= (
+                    KoreaPaperBuyOrderHeaders(**headers) if side == "buy" else KoreaPaperSellOrderHeaders(**headers)
+                )
 
             if order_type == "market":
                 body |= KoreaMarketOrderBody(**body, PDNO=ticker, ORD_QTY=amount)
             elif order_type == "limit":
-                body |= KoreaOrderBody(**body, PDNO=ticker, ORD_DVSN=KoreaOrderType.limit, ORD_QTY=amount, ORD_UNPR=price)
+                body |= KoreaOrderBody(
+                    **body, PDNO=ticker, ORD_DVSN=KoreaOrderType.limit, ORD_QTY=amount, ORD_UNPR=price
+                )
         elif exchange in ("NASDAQ", "NYSE", "AMEX"):
             exchange_code = self.order_exchange_code.get(exchange)
             current_price = self.fetch_current_price(exchange, ticker)
-            price = current_price + mintick*50 if side == "buy" else current_price - mintick*50
+            price = current_price + mintick * 50 if side == "buy" else current_price - mintick * 50
             if price < 1:
                 price = 1.0
             price = float("{:.2f}".format(price))
@@ -160,18 +173,36 @@ class KoreaInvestment:
                 headers |= UsaPaperBuyOrderHeaders(**headers) if side == "buy" else UsaPaperSellOrderHeaders(**headers)
 
             if order_type == "market":
-                body |= UsaOrderBody(**body, PDNO=ticker, ORD_DVSN=UsaOrderType.limit.value, ORD_QTY=amount, OVRS_ORD_UNPR=price, OVRS_EXCG_CD=exchange_code)
+                body |= UsaOrderBody(
+                    **body,
+                    PDNO=ticker,
+                    ORD_DVSN=UsaOrderType.limit.value,
+                    ORD_QTY=amount,
+                    OVRS_ORD_UNPR=price,
+                    OVRS_EXCG_CD=exchange_code,
+                )
             elif order_type == "limit":
-                body |= UsaOrderBody(**body, PDNO=ticker, ORD_DVSN=UsaOrderType.limit.value, ORD_QTY=amount, OVRS_ORD_UNPR=price, OVRS_EXCG_CD=exchange_code)
+                body |= UsaOrderBody(
+                    **body,
+                    PDNO=ticker,
+                    ORD_DVSN=UsaOrderType.limit.value,
+                    ORD_QTY=amount,
+                    OVRS_ORD_UNPR=price,
+                    OVRS_EXCG_CD=exchange_code,
+                )
         return self.post(endpoint, body, headers)
 
-    def create_market_buy_order(self, exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"], ticker: str, amount: int, price: int = 0):
+    def create_market_buy_order(
+        self, exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"], ticker: str, amount: int, price: int = 0
+    ):
         if exchange == "KRX":
             return self.create_order(exchange, ticker, "market", "buy", amount)
         elif exchange == "usa":
             return self.create_order(exchange, ticker, "market", "buy", amount, price)
 
-    def create_market_sell_order(self, exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"], ticker: str, amount: int, price: int = 0):
+    def create_market_sell_order(
+        self, exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"], ticker: str, amount: int, price: int = 0
+    ):
         if exchange == "KRX":
             return self.create_order(exchange, ticker, "market", "sell", amount)
         elif exchange == "usa":
@@ -211,11 +242,11 @@ class KoreaInvestment:
             return None
 
     def open_json(self, path):
-        with open(path, 'r') as f:
+        with open(path, "r") as f:
             return json.load(f)
 
     def write_json(self, path, data):
-        with open(path, 'w') as f:
+        with open(path, "w") as f:
             json.dump(data, f)
 
 

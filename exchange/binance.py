@@ -1,148 +1,290 @@
-from .pexchange import ccxt, ccxt_async, httpx
-from model import MarketOrder
-from pprint import pprint
+from exchange.pexchange import ccxt, ccxt_async, httpx
+from devtools import debug
+from exchange.model import MarketOrder
+import exchange.error as error
 
 class Binance:
     def __init__(self, key, secret):
-        self.future = ccxt.binance({
-            'apiKey': key,
-            'secret': secret,
-            'enableRateLimit': True,
-            'options': {
-                'defaultType': 'future'
+        self.client = ccxt.binance(
+            {
+                "apiKey": key,
+                "secret": secret,
+                "options": {"adjustForTimeDifference": True},
             }
-        })
-        self.future_async = ccxt_async.binance({
-            'apiKey': key,
-            'secret': secret,
-            'options': {
-                'defaultType': 'future'
-            }
-        })
-        self.spot = ccxt.binance({
-            'apiKey': key,
-            'secret': secret,
-        })
-        self.spot_async = ccxt_async.binance({
-            'apiKey': key,
-            'secret': secret,
-        })
-        self.spot.load_markets()
-        self.future.load_markets()
+        )
+        self.client.load_markets()
+        self.position_mode = "one-way"
         self.order_info: MarketOrder = None
 
-    def parse_quote(self, quote: str):
-        if self.order_info is None:
-            return quote.replace(".P", "")
-        else:
-            if self.order_info.is_futures:
-                return quote.replace(".P", "")
+    def init_info(self, order_info: MarketOrder):
+        self.order_info = order_info
+
+        unified_symbol = order_info.unified_symbol
+        market = self.client.market(unified_symbol)
+
+        if order_info.amount is not None:
+            order_info.amount = float(self.client.amount_to_precision(order_info.unified_symbol, order_info.amount))
+
+        if order_info.is_futures:
+            if order_info.is_coinm:
+                is_contract = market.get("contract")
+                if is_contract:
+                    order_info.is_contract = True
+                    order_info.contract_size = market.get("contractSize")
+                self.client.options["defaultType"] = "delivery"
             else:
-                return quote
-
-    def parse_symbol(self, base: str, quote: str):
-        quote = self.parse_quote(quote)
-        if self.order_info is None:
-            return f"{base}{quote}"
+                self.client.options["defaultType"] = "swap"
         else:
-            if self.order_info.is_futures:
-                return f"{base}/{quote}"
+            self.client.options["defaultType"] = "spot"
+
+    def get_ticker(self, symbol: str):
+        return self.client.fetch_ticker(symbol)
+
+    def get_price(self, symbol: str):
+        return self.get_ticker(symbol)["last"]
+
+    def get_futures_position(self, symbol=None, all=False):
+        if symbol is None and all:
+            positions = self.client.fetch_balance()["info"]["positions"]
+            positions = [position for position in positions if float(position["positionAmt"]) != 0]
+            return positions
+
+        positions = None
+        if self.order_info.is_coinm:
+            positions = self.client.fetch_balance()["info"]["positions"]
+            positions = [
+                position
+                for position in positions
+                if float(position["positionAmt"]) != 0 and position["symbol"] == self.client.market(symbol).get("id")
+            ]
+        else:
+            positions = self.client.fetch_positions(symbols=[symbol])
+
+        long_contracts = None
+        short_contracts = None
+        if positions:
+            if self.order_info.is_coinm:
+                for position in positions:
+                    amt = float(position["positionAmt"])
+                    if position["positionSide"] == "LONG":
+                        long_contracts = amt
+                    elif position["positionSide"] == "SHORT":
+                        short_contracts: float = amt
+                    elif position["positionSide"] == "BOTH":
+                        if amt > 0:
+                            long_contracts = amt
+                        elif amt < 0:
+                            short_contracts = abs(amt)
             else:
-                return f"{base}/{quote}"
-
-    def parse_side(self, side: str):
-        if side.startswith("entry/") or side.startswith("close/"):
-            return side.split("/")[-1]
+                for position in positions:
+                    if position["side"] == "long":
+                        long_contracts = position["contracts"]
+                    elif position["side"] == "short":
+                        short_contracts = position["contracts"]
+            if self.order_info.is_close and self.order_info.is_buy:
+                if not short_contracts:
+                    raise error.ShortPositionNoneError()
+                else:
+                    return short_contracts
+            elif self.order_info.is_close and self.order_info.is_sell:
+                if not long_contracts:
+                    raise error.LongPositionNoneError()
+                else:
+                    return long_contracts
         else:
-            return side
+            raise error.PositionNoneError()
 
-    def get_amount(self, base, quote, amount, percent) -> float:
-        if amount is not None and percent is not None:
-            raise Exception("amount와 percent는 동시에 사용할 수 없습니다")
-        elif amount is not None:
-            result = amount
-        elif percent is not None:
-            if self.order_info.side in ("buy", "entry/buy", "entry/sell"):
-                cash = self.get_balance(quote) * percent/100
-                current_price = self.fetch_price(base, quote)
-                result = cash / current_price
-            elif self.order_info.side in ("sell", "close/buy", "close/sell"):
-                symbol = self.parse_symbol(base, quote)
-                free_amount = self.get_futures_position(symbol) if self.order_info.is_crypto and self.order_info.is_futures else self.get_balance(base)
-                result = free_amount * float(percent)/100
+    def get_balance(self, base: str):
+        free_balance_by_base = None
+
+        if self.order_info.is_entry or (
+            self.order_info.is_spot and (self.order_info.is_buy or self.order_info.is_sell)
+        ):
+            free_balance = self.client.fetch_free_balance()
+            free_balance_by_base = free_balance.get(base)
+
+        if free_balance_by_base is None or free_balance_by_base == 0:
+            raise error.FreeAmountNoneError()
+        return free_balance_by_base
+
+    def get_amount(self, order_info: MarketOrder) -> float:
+        if order_info.amount is not None and order_info.percent is not None:
+            raise error.AmountPercentBothError()
+        elif order_info.amount is not None:
+            if order_info.is_contract:
+                current_price = self.get_price(order_info.unified_symbol)
+                result = (order_info.amount * current_price) // order_info.contract_size
+            else:
+                result = order_info.amount
+        elif order_info.percent is not None:
+            if order_info.is_entry or (order_info.is_spot and order_info.is_buy):
+                if order_info.is_coinm:
+                    free_base = self.get_balance(order_info.base)
+                    if order_info.is_contract:
+                        current_price = self.get_price(order_info.unified_symbol)
+                        result = (free_base * order_info.percent / 100 * current_price) // order_info.contract_size
+                    else:
+                        result = free_base * order_info.percent / 100
+                else:
+                    free_quote = self.get_balance(order_info.quote)
+                    cash = free_quote * order_info.percent / 100
+                    current_price = self.get_price(order_info.unified_symbol)
+                    if order_info.is_contract:
+                        result = (cash / current_price) // order_info.contract_size
+                    else:
+                        result = cash / current_price
+            elif self.order_info.is_close:
+                if order_info.is_contract:
+                    free_amount = self.get_futures_position(order_info.unified_symbol)
+                    result = free_amount * order_info.percent / 100
+                else:
+                    free_amount = self.get_futures_position(order_info.unified_symbol)
+                    result = free_amount * float(order_info.percent) / 100
+            elif order_info.is_spot and order_info.is_sell:
+                free_amount = self.get_balance(order_info.base)
+                result = free_amount * float(order_info.percent) / 100
+
+            result = float(self.client.amount_to_precision(order_info.unified_symbol, result))
+            order_info.amount_by_percent = result
         else:
-            raise Exception("amount와 percent 중 하나는 입력해야 합니다")
+            raise error.AmountPercentNoneError()
+
         return result
 
-    def market_order(self, base: str, quote: str, type: str, side: str, amount: float, price: float = None):
-        symbol = self.parse_symbol(base, quote)
-        side = self.parse_side(side)
-        return self.spot.create_order(symbol, type.lower(), side.lower(), amount)
+    def set_leverage(self, leverage, symbol):
+        if self.order_info.is_futures:
+            self.client.set_leverage(leverage, symbol)
 
-    async def market_order_async(self, base: str, quote: str, type: str, side: str, amount: float, price: float = None):
-        symbol = self.parse_symbol(base, quote)
-        side = self.parse_side(side)
-        return await self.spot_async.create_order(symbol, type.lower(), side.lower(), amount)
+    def market_order(self, order_info: MarketOrder):
+        from exchange.pexchange import retry
 
-    def market_buy(self, base: str, quote: str, type: str, side: str, amount: float, price: float = None, buy_percent: float = None):
-        buy_amount = self.get_amount(base, quote, amount, buy_percent)
-        return self.market_order(base, quote, type, side, buy_amount)
+        symbol = order_info.unified_symbol  # self.parse_symbol(base, quote)
+        params = {}
+        try:
+            return retry(
+                self.client.create_order,
+                symbol,
+                order_info.type.lower(),
+                order_info.side,
+                order_info.amount,
+                None,
+                params,
+                order_info=order_info,
+                max_attempts=5,
+                delay=0.1,
+                instance=self,
+            )
+        except Exception as e:
+            raise error.OrderError(e, self.order_info)
 
-    async def market_buy_async(self, base: str, quote: str, type: str, side: str, amount: float, price: float = None, buy_percent: float = None):
-        buy_amount = self.get_amount(base, quote, amount, buy_percent)
-        return await self.market_order_async(base, quote, type, side, buy_amount)
+    # async def market_order_async(
+    #     self,
+    #     base: str,
+    #     quote: str,
+    #     type: str,
+    #     side: str,
+    #     amount: float,
+    #     price: float = None,
+    # ):
+    #     symbol = self.parse_symbol(base, quote)
+    #     return await self.spot_async.create_order(
+    #         symbol, type.lower(), side.lower(), amount
+    #     )
 
-    def market_sell(self, base: str, quote: str, type: str, side: str, amount: float, price: str = None, sell_percent: float = None):
-        sell_amount = self.get_amount(base, quote, amount, sell_percent)
-        return self.market_order(base, quote, type, side, sell_amount)
+    def market_buy(self, order_info: MarketOrder):
+        # 수량기반
+        buy_amount = self.get_amount(order_info)
+        order_info.amount = buy_amount
 
-    async def market_sell_async(self, base: str, quote: str, type: str, side: str, amount: float, price: str = None, sell_percent: float = None):
-        sell_amount = self.get_amount(base, quote, amount, sell_percent)
-        return await self.market_order_async(base, quote, type, side, sell_amount)
+        return self.market_order(order_info)
+
+    def market_sell(self, order_info: MarketOrder):
+        sell_amount = self.get_amount(order_info)
+        order_info.amount = sell_amount
+        return self.market_order(order_info)
+
+    def market_entry(
+        self,
+        order_info: MarketOrder,
+    ):
+        from exchange.pexchange import retry
+
+        # self.client.options["defaultType"] = "swap"
+        symbol = self.order_info.unified_symbol  # self.parse_symbol(base, quote)
+
+        entry_amount = self.get_amount(order_info)
+        if entry_amount == 0:
+            raise error.MinAmountError()
+        if self.position_mode == "one-way":
+            params = {}
+        elif self.position_mode == "hedge":
+            if order_info.side == "buy":
+                if order_info.is_entry:
+                    positionSide = "LONG"
+                elif order_info.is_close:
+                    positionSide = "SHORT"
+            elif order_info.side == "sell":
+                if order_info.is_entry:
+                    positionSide = "SHORT"
+                elif order_info.is_close:
+                    positionSide = "LONG"
+            params = {"positionSide": positionSide}
+        if order_info.leverage is not None:
+            self.set_leverage(order_info.leverage, symbol)
+
+        try:
+            result = retry(
+                self.client.create_order,
+                symbol,
+                order_info.type.lower(),
+                order_info.side,
+                abs(entry_amount),
+                None,
+                params,
+                order_info=order_info,
+                max_attempts=10,
+                delay=0.1,
+                instance=self,
+            )
+            return result
+        except Exception as e:
+            raise error.OrderError(e, self.order_info)
 
     def is_hedge_mode(self):
-        response = self.future.fapiPrivate_get_positionside_dual()
-        if response['dualSidePosition']:
+        response = self.client.fapiPrivate_get_positionside_dual()
+        if response["dualSidePosition"]:
             return True
         else:
-            return False        
+            return False
 
-    def market_entry(self, base: str, quote: str, type: str, side: str, amount: float, price: str = None, entry_percent: float = None, leverage: int = None):
-        symbol = self.parse_symbol(base, quote)
-        side = self.parse_side(side)
-        quote = self.parse_quote(quote)
-        entry_amount = self.get_amount(base, quote, amount, entry_percent)
-        if leverage is not None:
-            self.set_leverage(leverage, symbol)
-        try:
-            return self.future.create_order(symbol, type.lower(), side, abs(entry_amount))
-        except Exception as e:
-            if "position side does not match" in str(e):
-                if side == "buy":
-                    positionSide = "LONG"
-                elif side == "sell":
-                    positionSide = "SHORT"
-                return self.future.create_order(symbol, type.lower(), side, abs(entry_amount), params={'positionSide': positionSide})
-            else:
-                raise Exception("진입 실패")
-
-                
-
-    def market_long_entry(self, base: str, quote: str, amount: float, price:str =None, entry_percent: float = None, leverage: int = None):
-        return self.market_entry(base, quote, "market", "entry/buy", amount, price, entry_percent, leverage)
-    
-    def market_short_entry(self, base: str, quote: str, amount: float, price:str =None, entry_percent: float = None, leverage: int = None):
-        return self.market_entry(base, quote, "market", "entry/sell", amount, price, entry_percent, leverage)
-
-    # def market_stop_order(self, base: str, quote: str, type: str, side: str, amount: float, price: float, stop_price: float):
-    #     symbol = f"{base}/{quote}"
-    #     return self.future.create_stop_market_order(symbol, type.lower(), side.lower(), amount, price, {"stopPrice": stop_price})
-
-    def market_sltp_order(self, base: str, quote: str, type: str, side: str, amount: float, stop_price: float, profit_price: float):
-        symbol = self.parse_symbol(base, quote)
-        inverted_side = 'sell' if side.lower() == 'buy' else 'buy'  # buy면 sell, sell이면 buy * 진입 포지션과 반대로 주문 넣어줘 야함
-        self.future.create_order(symbol, "STOP_MARKET", inverted_side, amount, None, {"stopPrice": stop_price, "newClientOrderId": "STOP_MARKET"})                   # STOP LOSS 오더
-        self.future.create_order(symbol, "TAKE_PROFIT_MARKET", inverted_side, amount, None, {"stopPrice": profit_price, "newClientOrderId": "TAKE_PROFIT_MARKET"})   # TAKE profit 오더
+    def market_sltp_order(
+        self,
+        base: str,
+        quote: str,
+        type: str,
+        side: str,
+        amount: float,
+        stop_price: float,
+        profit_price: float,
+    ):
+        symbol = self.order_info.unified_symbol  # self.parse_symbol(base, quote)
+        inverted_side = "sell" if side.lower() == "buy" else "buy"  # buy면 sell, sell이면 buy * 진입 포지션과 반대로 주문 넣어줘 야함
+        self.client.create_order(
+            symbol,
+            "STOP_MARKET",
+            inverted_side,
+            amount,
+            None,
+            {"stopPrice": stop_price, "newClientOrderId": "STOP_MARKET"},
+        )  # STOP LOSS 오더
+        self.client.create_order(
+            symbol,
+            "TAKE_PROFIT_MARKET",
+            inverted_side,
+            amount,
+            None,
+            {"stopPrice": profit_price, "newClientOrderId": "TAKE_PROFIT_MARKET"},
+        )  # TAKE profit 오더
 
         # response = self.future.private_post_order_oco({
         #     'symbol': self.future.market(symbol)['id'],
@@ -160,91 +302,54 @@ class Binance:
         #     # 'newOrderRespType': 'ACK',  # ACK, RESULT, FULL
         # })
 
-    async def market_entry_async(self, base: str, quote: str, type: str, side: str, amount: float, price: str = None, entry_percent: float = None, leverage: int = None):
-        symbol = self.parse_symbol(base, quote)
-        side = self.parse_side(side)
-        quote = self.parse_quote(quote)
-        entry_amount = self.get_amount(base, quote, amount, entry_percent)
-        if leverage is not None:
-            self.set_leverage(leverage, symbol)
-        return await self.future_async.create_order(symbol, type.lower(), side, abs(entry_amount))
+    def market_close(
+        self,
+        order_info: MarketOrder,
+    ):
+        from exchange.pexchange import retry
 
-    def market_close(self, base: str, quote: str, type: str, side: str, amount: float = None, price: str = None, close_percent: str = None):
-        symbol = self.parse_symbol(base, quote)
-        side = self.parse_side(side)
-        quote = self.parse_quote(quote)
-        close_amount = self.get_amount(base, quote, amount, close_percent)
-        try:
-            return self.future.create_order(symbol, type.lower(), side, close_amount, params={"reduceOnly": True})
-        except Exception as e:
-            if "position side does not match" in str(e):
-                if side == "buy":
-                    positionSide = "SHORT"
-                elif side == "sell":
+        symbol = self.order_info.unified_symbol  # self.parse_symbol(base, quote)
+        close_amount = self.get_amount(order_info)
+        if self.position_mode == "one-way":
+            params = {"reduceOnly": True}
+        elif self.position_mode == "hedge":
+            if order_info.side == "buy":
+                if order_info.is_entry:
                     positionSide = "LONG"
-                return self.future.create_order(symbol, type.lower(), side, close_amount, params={'positionSide': positionSide})
-            else:
-                raise Exception("종료 실패")
+                elif order_info.is_close:
+                    positionSide = "SHORT"
+            elif order_info.side == "sell":
+                if order_info.is_entry:
+                    positionSide = "SHORT"
+                elif order_info.is_close:
+                    positionSide = "LONG"
+            params = {"positionSide": positionSide}
 
-    
-    def market_long_close(self, base: str, quote: str, amount: float = None, price: str = None, close_percent: str = None):
-        return self.market_close(base, quote, "market", "close/sell", amount, price, close_percent)
-
-    def market_short_close(self, base: str, quote: str, amount: float = None, price: str = None, close_percent: str = None):
-        return self.market_close(base, quote, "market", "close/buy", amount, price, close_percent)
-
-    async def market_close_async(self, base: str, quote: str, type: str, side: str, amount: float = None, price: str = None, close_percent: str = None):
-        symbol = self.parse_symbol(base, quote)
-        side = self.parse_side(side)
-        quote = self.parse_quote(quote)
-        close_amount = self.get_amount(base, quote, amount, close_percent)
-        return await self.future_async.create_order(symbol, type.lower(), side, close_amount, params={"reduceOnly": True})
-
-    def set_leverage(self, leverage, symbol):
-        self.future.set_leverage(leverage, symbol)
-
-    def fetch_ticker(self, base: str, quote: str):
-        symbol = self.parse_symbol(base, quote)
-        if self.order_info.is_futures:
-            return self.future.fetch_ticker(symbol)
-        else:
-            return self.spot.fetch_ticker(symbol)
-
-    def fetch_price(self, base: str, quote: str):
-        return self.fetch_ticker(base, quote)["last"]
-
-    def get_balance(self, base: str):
-        balance = self.future.fetch_free_balance().get(base) if self.order_info.is_crypto and self.order_info.is_futures else self.spot.fetch_free_balance().get(base)
-        if balance is None or balance == 0:
-            raise Exception("거래할 수량이 없습니다")
-        return balance
-
-    def get_futures_position(self, symbol):
-        positions = self.future.fetch_positions_risk(symbols=[symbol])
-        long_contracts = None
-        short_contracts = None
-        if positions:
-            for position in positions:
-                if position["side"] == "long":
-                    long_contracts = position["contracts"]
-                elif position["side"] == "short":
-                    short_contracts = position["contracts"]
-
-            if self.order_info.side == "close/buy":
-                if not short_contracts:
-                    raise Exception("숏 포지션이 없습니다")
-                else:
-                    return short_contracts
-            elif self.order_info.side == "close/sell":
-                if not long_contracts:
-                    raise Exception("롱 포지션이 없습니다")
-                else:
-                    return long_contracts
-        else:
-            raise Exception("포지션이 없습니다")
+        try:
+            return retry(
+                self.client.create_order,
+                symbol,
+                order_info.type.lower(),
+                order_info.side,
+                abs(close_amount),
+                None,
+                params,
+                order_info=order_info,
+                max_attempts=10,
+                delay=0.1,
+                instance=self,
+            )
+        except Exception as e:
+            raise error.OrderError(e, self.order_info)
 
     def get_listen_key(self):
-        url = 'https://fapi.binance.com/fapi/v1/listenKey'
+        url = "https://fapi.binance.com/fapi/v1/listenKey"
 
-        listenkey = httpx.post(url, headers={'X-MBX-APIKEY': self.future.apiKey}).json()["listenKey"]
+        listenkey = httpx.post(url, headers={"X-MBX-APIKEY": self.client.apiKey}).json()["listenKey"]
         return listenkey
+
+    def get_trades(self):
+        is_futures = self.order_info.is_futures
+        if is_futures:
+            trades = self.client.fetch_my_trades()
+            print(trades)

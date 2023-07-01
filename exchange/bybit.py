@@ -1,170 +1,56 @@
 from pprint import pprint
 from exchange.pexchange import ccxt
-from model import MarketOrder
+from exchange.model import MarketOrder
 import time
+import exchange.error as error
+from devtools import debug
+
 
 class Bybit:
     def __init__(self, key, secret):
-        self.future = ccxt.bybit({
-            'apiKey': key,
-            'secret': secret,
-            'enableRateLimit': True,
-            'options': {
-                'defaultType': 'future'
+        self.client = ccxt.bybit(
+            {
+                "apiKey": key,
+                "secret": secret,
+                "options": {"adjustForTimeDifference": True},
             }
-        })
-        self.spot = ccxt.bybit({
-            'apiKey': key,
-            'secret': secret,
-            'enableRateLimit': True,
-            'options': {
-                "defaultType": "spot"
-            }
-        })
-        self.spot.load_markets()
-        self.future.load_markets()
+        )
+        self.client.load_markets()
         self.order_info: MarketOrder = None
+        self.position_mode = "one-way"
 
-    def parse_quote(self, quote: str):
-        if self.order_info.is_futures:
-            return quote.replace(".P", "")
-        else:
-            return quote
+    def load_time_difference(self):
+        self.client.load_time_difference()
 
-    def parse_symbol(self, base: str, quote: str):
-        quote = self.parse_quote(quote)
-        if self.order_info.is_futures:
-            return f"{base}/{quote}:{quote}"
-        else:
-            return f"{base}/{quote}"
+    def init_info(self, order_info: MarketOrder):
+        self.order_info = order_info
 
-    def parse_side(self, side: str):
-        if side.startswith("entry/") or side.startswith("close/"):
-            return side.split("/")[-1]
-        else:
-            return side
+        unified_symbol = order_info.unified_symbol
+        market = self.client.market(unified_symbol)
 
-    def get_amount(self, base, quote, amount, percent) -> float:
-        if amount is not None and percent is not None:
-            raise Exception("amount와 percent는 동시에 사용할 수 없습니다")
-        elif amount is not None:
-            result = amount
-        elif percent is not None:
-            if self.order_info.side in ("buy", "entry/buy", "entry/sell"):
-                cash = self.get_balance(quote) * percent/100
-                current_price = self.fetch_price(base, quote)
-                result = cash / current_price
-            elif self.order_info.side in ("sell", "close/buy", "close/sell"):
-                symbol = self.parse_symbol(base, quote)
-                free_amount = self.get_futures_position(symbol) if self.order_info.is_crypto and self.order_info.is_futures else self.get_balance(base)
-                result = free_amount * float(percent)/100
-        else:
-            raise Exception("amount와 percent 중 하나는 입력해야 합니다")
-        return result
+        if order_info.amount is not None:
+            order_info.amount = float(self.client.amount_to_precision(order_info.unified_symbol, order_info.amount))
 
-    def get_order_amount(self, order_id: str, parsed_symbol: str):
-        order_amount = None
-        for i in range(8):
-            try:
-                if self.order_info.is_futures:
-                    order_result = self.future.fetch_order(order_id, parsed_symbol)
-                else:
-                    order_result = self.spot.fetch_order(order_id)
-                order_amount = order_result["amount"]
-            except Exception as e:
-                print("...")
-                time.sleep(0.5)
-        return order_amount
-
-    def market_order(self, base: str, quote: str, type: str, side: str, amount: float, price: float = None):
-        symbol = self.parse_symbol(base, quote)
-        order_result = self.spot.create_order(symbol, type.lower(), side.lower(), amount, price)
-        return order_result
-
-    def market_buy(self, base: str, quote: str, type: str, side: str, amount: float, price: float = None, buy_percent: float = None):
-        # 비용주문
-        buy_amount = self.get_amount(base, quote, amount, buy_percent)
-        if price is None:
-            price = self.fetch_price(base, quote)
-        return self.market_order(base, quote, type, side, buy_amount, price)
-
-    def market_sell(self, base: str, quote: str, type: str, side: str, amount: float = None, price: float = None, sell_percent: str = None):
-        sell_amount = self.get_amount(base, quote, amount, sell_percent)
-        return self.market_order(base, quote, type, side, sell_amount)
-
-    def market_entry(self, base: str, quote: str, type: str, side: str, amount: float, price: float = None, entry_percent: float = None, leverage: int = None):
-        symbol = self.parse_symbol(base, quote)
-        side = self.parse_side(side)
-        quote = self.parse_quote(quote)
-        entry_amount = self.get_amount(base, quote, amount, entry_percent)
-        if leverage is not None:
-            self.set_leverage(leverage, symbol)
-        try:
-            order_result = self.future.create_order(symbol, type.lower(), side, abs(entry_amount), params={"position_idx": 0})
-            order_amount = self.get_order_amount(order_result["id"], symbol)
-            order_result["amount"] = order_amount
-            return order_result
-        except Exception as e:
-            error = str(e)
-            if "position idx not match position mode" in error:
-                position_idx = None
-                if side == "buy":
-                    position_idx = 1
-                elif side == "sell":
-                    position_idx = 2
-                if position_idx is None:
-                    raise Exception("position_idx error")
-                order_result = self.future.create_order(symbol, type.lower(), side, abs(entry_amount), params={"position_idx": position_idx})
-                order_amount = self.get_order_amount(order_result["id"], symbol)
-                order_result["amount"] = order_amount
-                return order_result
+        if order_info.is_futures:
+            if order_info.is_coinm:
+                self.client.options["defaultType"] = "delivery"
+                is_contract = market.get("contract")
+                if is_contract:
+                    order_info.is_contract = True
+                    order_info.contract_size = market.get("contractSize")
             else:
-                raise Exception("create_order error")
-
-    def market_close(self, base: str, quote: str, type: str, side: str, amount: float = None, price: float = None, close_percent: str = None):
-        symbol = self.parse_symbol(base, quote)
-        quote = self.parse_quote(quote)
-        side = self.parse_side(side)
-        close_amount = self.get_amount(base, quote, amount, close_percent)
-        try:
-            order_result = self.future.create_order(symbol, type.lower(), side, close_amount, params={"reduceOnly": True, "position_idx": 0})
-            order_amount = self.get_order_amount(order_result["id"], symbol)
-            order_result["amount"] = order_amount
-            return order_result
-        except Exception as e:
-            error = str(e)
-            if "position idx not match position mode" in error:
-                position_idx = None
-                if side == "buy":
-                    position_idx = 2
-                elif side == "sell":
-                    position_idx = 1
-                if position_idx is None:
-                    raise Exception("position_idx error")
-                order_result = self.future.create_order(symbol, type.lower(), side, abs(close_amount), params={"reduceOnly": True,"positionIdx": position_idx})
-                order_amount = self.get_order_amount(order_result["id"], symbol)
-                order_result["amount"] = order_amount
-                return order_result
-
-
-    def get_balance(self, base: str):
-        balance = self.future.fetch_free_balance().get(base) if self.order_info.is_crypto and self.order_info.is_futures else self.spot.fetch_free_balance().get(base)
-        if balance is None or balance == 0:
-            raise Exception("거래할 수량이 없습니다")
-        return balance
-
-    def fetch_ticker(self, base: str, quote: str):
-        symbol = self.parse_symbol(base, quote)
-        if self.order_info.is_futures:
-            return self.future.fetch_ticker(symbol)
+                self.client.options["defaultType"] = "swap"
         else:
-            return self.spot.fetch_ticker(symbol)
+            self.client.options["defaultType"] = "spot"
 
-    def fetch_price(self, base: str, quote: str):
-        return self.fetch_ticker(base, quote)["last"]
+    def get_ticker(self, symbol: str):
+        return self.client.fetch_ticker(symbol)
+
+    def get_price(self, symbol: str):
+        return self.get_ticker(symbol)["last"]
 
     def get_futures_position(self, symbol):
-        positions = self.future.fetch_positions(symbols=[symbol])
+        positions = self.client.fetch_positions(symbols=[symbol])
         long_contracts = None
         short_contracts = None
         if positions:
@@ -174,25 +60,214 @@ class Bybit:
                 elif position["side"] == "short":
                     short_contracts = position["contracts"]
 
-            if self.order_info.side == "close/buy":
+            if self.order_info.is_close and self.order_info.is_buy:
                 if not short_contracts:
-                    raise Exception("숏 포지션이 없습니다")
+                    raise error.ShortPositionNoneError()
                 else:
                     return short_contracts
-            elif self.order_info.side == "close/sell":
+            elif self.order_info.is_close and self.order_info.is_sell:
                 if not long_contracts:
-                    raise Exception("롱 포지션이 없습니다")
+                    raise error.LongPositionNoneError()
                 else:
                     return long_contracts
         else:
-            raise Exception("거래할 수량이 없습니다")
+            raise error.PositionNoneError()
+
+    def get_balance(self, base: str):
+        free_balance_by_base = None
+        if self.order_info.is_entry or (
+            self.order_info.is_spot and (self.order_info.is_buy or self.order_info.is_sell)
+        ):
+            free_balance = self.client.fetch_free_balance()
+            free_balance_by_base = free_balance.get(base)
+
+        if free_balance_by_base is None or free_balance_by_base == 0:
+            raise error.FreeAmountNoneError()
+        return free_balance_by_base
+
+    def get_amount(self, order_info: MarketOrder) -> float:
+        if order_info.amount is not None and order_info.percent is not None:
+            raise error.AmountPercentBothError()
+        elif order_info.amount is not None:
+            if order_info.is_contract:
+                current_price = self.get_price(order_info.unified_symbol)
+                result = (order_info.amount * current_price) // order_info.contract_size
+            else:
+                result = order_info.amount
+        elif order_info.percent is not None:
+            if order_info.is_entry or (order_info.is_spot and order_info.is_buy):
+                free_quote = self.get_balance(order_info.quote)
+                cash = free_quote * order_info.percent / 100
+                current_price = self.get_price(order_info.unified_symbol)
+                result = cash / current_price
+            elif self.order_info.is_close:
+                if order_info.is_contract:
+                    free_amount = self.get_futures_position(order_info.unified_symbol)
+                    result = free_amount * order_info.percent / 100
+                else:
+                    free_amount = self.get_futures_position(order_info.unified_symbol)
+                    result = free_amount * order_info.percent / 100
+            elif order_info.is_spot and order_info.is_sell:
+                free_amount = self.get_balance(order_info.base)
+                result = free_amount * order_info.percent / 100
+            result = float(self.client.amount_to_precision(order_info.unified_symbol, result))
+            order_info.amount_by_percent = result
+        else:
+            raise error.AmountPercentNoneError()
+        return result
 
     def set_leverage(self, leverage: float, symbol: str):
         try:
-            self.future.set_leverage(leverage, symbol)
+            self.client.set_leverage(leverage, symbol)
         except Exception as e:
             error = str(e)
             if "leverage not modified" in error:
                 pass
             else:
                 raise Exception(e)
+
+    def get_order_amount(self, order_id: str, order_info: MarketOrder):
+        order_amount = None
+        for i in range(8):
+            try:
+                if order_info.is_futures:
+                    order_result = self.client.fetch_order(order_id, order_info.unified_symbol)
+                else:
+                    order_result = self.client.fetch_order(order_id)
+                order_amount = order_result["amount"]
+                break
+            except Exception as e:
+                print("...", e)
+                time.sleep(0.5)
+        return order_amount
+
+    def market_order(self, order_info: MarketOrder):
+        from exchange.pexchange import retry
+
+        symbol = order_info.unified_symbol
+        params = {}
+        try:
+            return retry(
+                self.client.create_order,
+                symbol,
+                order_info.type.lower(),
+                order_info.side,
+                order_info.amount,
+                order_info.price,
+                params,
+                order_info=order_info,
+                max_attempts=5,
+                delay=0.1,
+                instance=self,
+            )
+        except Exception as e:
+            raise error.OrderError(e, order_info)
+
+    def market_buy(
+        self,
+        order_info: MarketOrder,
+    ):
+        # 비용주문
+        buy_amount = self.get_amount(order_info)
+        order_info.amount = buy_amount
+        order_info.price = self.get_price(order_info.unified_symbol)
+
+        return self.market_order(order_info)
+
+    def market_sell(self, order_info: MarketOrder):
+        sell_amount = self.get_amount(order_info)
+        order_info.amount = sell_amount
+        return self.market_order(order_info)
+
+    def market_entry(self, order_info: MarketOrder):
+        from exchange.pexchange import retry
+
+        symbol = order_info.unified_symbol
+
+        entry_amount = self.get_amount(order_info)
+        if entry_amount == 0:
+            raise error.MinAmountError()
+
+        if self.position_mode == "one-way":
+            params = {"position_idx": 0}
+        elif self.position_mode == "hedge":
+            if order_info.side == "buy":
+                if order_info.is_entry:
+                    position_idx = 1
+                    params = {"position_idx": position_idx}
+                elif order_info.is_close:
+                    position_idx = 2
+                    params = {"reduceOnly": True, "position_idx": position_idx}
+            elif order_info.side == "sell":
+                if order_info.is_entry:
+                    position_idx = 2
+                    params = {"position_idx": position_idx}
+                elif order_info.is_close:
+                    position_idx = 1
+                    params = {"reduceOnly": True, "position_idx": position_idx}
+
+        if order_info.leverage is not None:
+            self.set_leverage(order_info.leverage, symbol)
+        try:
+            result = retry(
+                self.client.create_order,
+                symbol,
+                order_info.type.lower(),
+                order_info.side,
+                abs(entry_amount),
+                None,
+                params,
+                order_info=order_info,
+                max_attempts=5,
+                delay=0.1,
+                instance=self,
+            )
+            # order_amount = self.get_order_amount(result["id"], order_info)
+            # result["amount"] = order_amount
+            return result
+        except Exception as e:
+            raise error.OrderError(e, order_info)
+
+    def market_close(self, order_info: MarketOrder):
+        from exchange.pexchange import retry
+
+        symbol = self.order_info.unified_symbol
+        close_amount = self.get_amount(order_info)
+
+        if self.position_mode == "one-way":
+            params = {"reduceOnly": True, "position_idx": 0}
+        elif self.position_mode == "hedge":
+            if order_info.side == "buy":
+                if order_info.is_entry:
+                    position_idx = 1
+                    params = {"position_idx": position_idx}
+                elif order_info.is_close:
+                    position_idx = 2
+                    params = {"reduceOnly": True, "position_idx": position_idx}
+            elif order_info.side == "sell":
+                if order_info.is_entry:
+                    position_idx = 2
+                    params = {"position_idx": position_idx}
+                elif order_info.is_close:
+                    position_idx = 1
+                    params = {"reduceOnly": True, "position_idx": position_idx}
+
+        try:
+            result = retry(
+                self.client.create_order,
+                symbol,
+                order_info.type.lower(),
+                order_info.side,
+                abs(close_amount),
+                None,
+                params,
+                order_info=order_info,
+                max_attempts=5,
+                delay=0.1,
+                instance=self,
+            )
+            # order_amount = self.get_order_amount(result["id"], order_info)
+            # result["amount"] = order_amount
+            return result
+        except Exception as e:
+            raise error.OrderError(e, self.order_info)

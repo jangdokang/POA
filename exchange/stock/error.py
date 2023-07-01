@@ -1,5 +1,5 @@
 class TokenExpired(Exception):
-    def __init__(self, msg='Token Expired!', *args, **kwargs):
+    def __init__(self, msg="Token Expired!", *args, **kwargs):
         super().__init__(msg, *args, **kwargs)
 
 

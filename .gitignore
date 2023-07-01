@@ -141,6 +141,7 @@ test.http
 test.py
 my_*
 my-*
+ecosystem.config.js
 
 # db
 pocketbase.exe
