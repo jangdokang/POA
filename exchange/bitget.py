@@ -114,10 +114,10 @@ class Bitget:
             raise error.AmountPercentNoneError()
         return result
 
-    def set_leverage(self, leverage, symbol, parsed_side):
-        if parsed_side == "buy":
+    def set_leverage(self, leverage, symbol):
+        if self.order_info.is_buy:
             hold_side = "long"
-        elif parsed_side == "sell":
+        elif self.order_info.is_sell:
             hold_side = "short"
         market = self.client.market(symbol)
         request = {
@@ -199,25 +199,6 @@ class Bitget:
             )
         except Exception as e:
             raise error.OrderError(e, order_info)
-        # try:
-        #     return self.future.create_order(symbol, type.lower(), side, abs(entry_amount))
-        # except Exception as e:
-        #     if "unilateral position" in str(e):
-        #         # POST /api/mix/v1/account/setPositionMode
-        #         # self.future.privateMixPostAccountSetPositionMode({"productType": "umcbl", "holdMode": "single_hold"})
-        #         try:
-        #             return self.future.create_order(
-        #                 symbol,
-        #                 type.lower(),
-        #                 side + "_single",
-        #                 abs(entry_amount),
-        #                 params={"side": side + "_single"},
-        #             )
-        #         except:
-        #             raise error.OrderError(e, self.order_info)
-
-        #     else:
-        #         raise error.OrderError(e, self.order_info)
 
     def market_close(self, order_info: MarketOrder):
         from exchange.pexchange import retry
