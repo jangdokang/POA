@@ -25,9 +25,6 @@ class Okx:
         unified_symbol = order_info.unified_symbol
         market = self.client.market(unified_symbol)
 
-        if order_info.amount is not None:
-            order_info.amount = float(self.client.amount_to_precision(order_info.unified_symbol, order_info.amount))
-
         is_contract = market.get("contract")
         if is_contract:
             order_info.is_contract = True
