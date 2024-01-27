@@ -29,7 +29,11 @@ class Bybit:
         market = self.client.market(unified_symbol)
 
         if order_info.amount is not None:
-            order_info.amount = float(self.client.amount_to_precision(order_info.unified_symbol, order_info.amount))
+            order_info.amount = float(
+                self.client.amount_to_precision(
+                    order_info.unified_symbol, order_info.amount
+                )
+            )
 
         if order_info.is_futures:
             if order_info.is_coinm:
@@ -76,9 +80,14 @@ class Bybit:
     def get_balance(self, base: str):
         free_balance_by_base = None
         if self.order_info.is_entry or (
-            self.order_info.is_spot and (self.order_info.is_buy or self.order_info.is_sell)
+            self.order_info.is_spot
+            and (self.order_info.is_buy or self.order_info.is_sell)
         ):
-            free_balance = self.client.fetch_free_balance()
+            free_balance = (
+                self.client.fetch_free_balance()
+                if not self.order_info.is_total
+                else self.client.fetch_total_balance()
+            )
             free_balance_by_base = free_balance.get(base)
 
         if free_balance_by_base is None or free_balance_by_base == 0:
@@ -97,7 +106,7 @@ class Bybit:
         elif order_info.percent is not None:
             if order_info.is_entry or (order_info.is_spot and order_info.is_buy):
                 free_quote = self.get_balance(order_info.quote)
-                cash = free_quote * order_info.percent / 100
+                cash = free_quote * (order_info.percent - 0.5) / 100
                 current_price = self.get_price(order_info.unified_symbol)
                 result = cash / current_price
             elif self.order_info.is_close:
@@ -110,7 +119,9 @@ class Bybit:
             elif order_info.is_spot and order_info.is_sell:
                 free_amount = self.get_balance(order_info.base)
                 result = free_amount * order_info.percent / 100
-            result = float(self.client.amount_to_precision(order_info.unified_symbol, result))
+            result = float(
+                self.client.amount_to_precision(order_info.unified_symbol, result)
+            )
             order_info.amount_by_percent = result
         else:
             raise error.AmountPercentNoneError()
@@ -131,7 +142,9 @@ class Bybit:
         for i in range(8):
             try:
                 if order_info.is_futures:
-                    order_result = self.client.fetch_order(order_id, order_info.unified_symbol)
+                    order_result = self.client.fetch_order(
+                        order_id, order_info.unified_symbol
+                    )
                 else:
                     order_result = self.client.fetch_order(order_id)
                 order_amount = order_result["amount"]

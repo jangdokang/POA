@@ -47,7 +47,9 @@ def delete(collection, id):
 def get_full_list(collection, batch_size=200, query_params=None):
     try:
         reauth()
-        return pb.collection(collection).get_full_list(batch=batch_size, query_params=query_params)
+        return pb.collection(collection).get_full_list(
+            batch=batch_size, query_params=query_params
+        )
     except:
         raise Exception("DB get_full_list error")
 

@@ -24,7 +24,11 @@ class Binance:
         market = self.client.market(unified_symbol)
 
         if order_info.amount is not None:
-            order_info.amount = float(self.client.amount_to_precision(order_info.unified_symbol, order_info.amount))
+            order_info.amount = float(
+                self.client.amount_to_precision(
+                    order_info.unified_symbol, order_info.amount
+                )
+            )
 
         if order_info.is_futures:
             if order_info.is_coinm:
@@ -47,7 +51,11 @@ class Binance:
     def get_futures_position(self, symbol=None, all=False):
         if symbol is None and all:
             positions = self.client.fetch_balance()["info"]["positions"]
-            positions = [position for position in positions if float(position["positionAmt"]) != 0]
+            positions = [
+                position
+                for position in positions
+                if float(position["positionAmt"]) != 0
+            ]
             return positions
 
         positions = None
@@ -56,7 +64,8 @@ class Binance:
             positions = [
                 position
                 for position in positions
-                if float(position["positionAmt"]) != 0 and position["symbol"] == self.client.market(symbol).get("id")
+                if float(position["positionAmt"]) != 0
+                and position["symbol"] == self.client.market(symbol).get("id")
             ]
         else:
             positions = self.client.fetch_positions(symbols=[symbol])
@@ -99,9 +108,14 @@ class Binance:
         free_balance_by_base = None
 
         if self.order_info.is_entry or (
-            self.order_info.is_spot and (self.order_info.is_buy or self.order_info.is_sell)
+            self.order_info.is_spot
+            and (self.order_info.is_buy or self.order_info.is_sell)
         ):
-            free_balance = self.client.fetch_free_balance()
+            free_balance = (
+                self.client.fetch_free_balance()
+                if not self.order_info.is_total
+                else self.client.fetch_total_balance()
+            )
             free_balance_by_base = free_balance.get(base)
 
         if free_balance_by_base is None or free_balance_by_base == 0:
@@ -123,12 +137,14 @@ class Binance:
                     free_base = self.get_balance(order_info.base)
                     if order_info.is_contract:
                         current_price = self.get_price(order_info.unified_symbol)
-                        result = (free_base * order_info.percent / 100 * current_price) // order_info.contract_size
+                        result = (
+                            free_base * order_info.percent / 100 * current_price
+                        ) // order_info.contract_size
                     else:
                         result = free_base * order_info.percent / 100
                 else:
                     free_quote = self.get_balance(order_info.quote)
-                    cash = free_quote * order_info.percent / 100
+                    cash = free_quote * (order_info.percent - 0.5) / 100
                     current_price = self.get_price(order_info.unified_symbol)
                     if order_info.is_contract:
                         result = (cash / current_price) // order_info.contract_size
@@ -145,7 +161,9 @@ class Binance:
                 free_amount = self.get_balance(order_info.base)
                 result = free_amount * float(order_info.percent) / 100
 
-            result = float(self.client.amount_to_precision(order_info.unified_symbol, result))
+            result = float(
+                self.client.amount_to_precision(order_info.unified_symbol, result)
+            )
             order_info.amount_by_percent = result
         else:
             raise error.AmountPercentNoneError()
@@ -269,7 +287,9 @@ class Binance:
         profit_price: float,
     ):
         symbol = self.order_info.unified_symbol  # self.parse_symbol(base, quote)
-        inverted_side = "sell" if side.lower() == "buy" else "buy"  # buy면 sell, sell이면 buy * 진입 포지션과 반대로 주문 넣어줘 야함
+        inverted_side = (
+            "sell" if side.lower() == "buy" else "buy"
+        )  # buy면 sell, sell이면 buy * 진입 포지션과 반대로 주문 넣어줘 야함
         self.client.create_order(
             symbol,
             "STOP_MARKET",
@@ -346,7 +366,9 @@ class Binance:
     def get_listen_key(self):
         url = "https://fapi.binance.com/fapi/v1/listenKey"
 
-        listenkey = httpx.post(url, headers={"X-MBX-APIKEY": self.client.apiKey}).json()["listenKey"]
+        listenkey = httpx.post(
+            url, headers={"X-MBX-APIKEY": self.client.apiKey}
+        ).json()["listenKey"]
         return listenkey
 
     def get_trades(self):

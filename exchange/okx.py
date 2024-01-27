@@ -38,12 +38,15 @@ class Okx:
     def get_amount_precision(self, symbol):
         market = self.client.market(symbol)
         precision = market.get("precision")
-        if precision is not None and isinstance(precision, dict) and "amount" in precision:
+        if (
+            precision is not None
+            and isinstance(precision, dict)
+            and "amount" in precision
+        ):
             return precision.get("amount")
 
     def get_contract_size(self, symbol):
         market = self.client.market(symbol)
-        debug(market)
         return market.get("contractSize")
 
     def parse_symbol(self, base: str, quote: str):
@@ -61,9 +64,14 @@ class Okx:
     def get_balance(self, base: str):
         free_balance_by_base = None
         if self.order_info.is_entry or (
-            self.order_info.is_spot and (self.order_info.is_buy or self.order_info.is_sell)
+            self.order_info.is_spot
+            and (self.order_info.is_buy or self.order_info.is_sell)
         ):
-            free_balance = self.client.fetch_free_balance()
+            free_balance = (
+                self.client.fetch_free_balance()
+                if not self.order_info.is_total
+                else self.client.fetch_total_balance()
+            )
             free_balance_by_base = free_balance.get(base)
 
         if free_balance_by_base is None or free_balance_by_base == 0:
@@ -73,7 +81,11 @@ class Okx:
     def get_futures_position(self, symbol=None, all=False):
         if symbol is None and all:
             positions = self.client.fetch_balance()["info"]["positions"]
-            positions = [position for position in positions if float(position["positionAmt"]) != 0]
+            positions = [
+                position
+                for position in positions
+                if float(position["positionAmt"]) != 0
+            ]
             return positions
 
         positions = self.client.fetch_positions([symbol])
@@ -112,12 +124,14 @@ class Okx:
                 if order_info.is_coinm:
                     free_base = self.get_balance(order_info.base)
                     if order_info.is_contract:
-                        result = (free_base * order_info.percent / 100) // order_info.contract_size
+                        result = (
+                            free_base * (order_info.percent - 0.5) / 100
+                        ) // order_info.contract_size
                     else:
                         result = free_base * order_info.percent / 100
                 else:
                     free_quote = self.get_balance(order_info.quote)
-                    cash = free_quote * order_info.percent / 100
+                    cash = free_quote * (order_info.percent - 0.5) / 100
                     current_price = self.get_price(order_info.unified_symbol)
                     if order_info.is_contract:
                         result = (cash / current_price) // order_info.contract_size
@@ -135,7 +149,9 @@ class Okx:
                 free_amount = self.get_balance(order_info.base)
                 result = free_amount * float(order_info.percent) / 100
 
-            result = float(self.client.amount_to_precision(order_info.unified_symbol, result))
+            result = float(
+                self.client.amount_to_precision(order_info.unified_symbol, result)
+            )
             order_info.amount_by_percent = result
         else:
             raise error.AmountPercentNoneError()
@@ -145,7 +161,9 @@ class Okx:
     def market_order(self, order_info: MarketOrder):
         from exchange.pexchange import retry
 
-        symbol = order_info.unified_symbol  # self.parse_symbol(order_info.base, order_info.quote)
+        symbol = (
+            order_info.unified_symbol
+        )  # self.parse_symbol(order_info.base, order_info.quote)
         params = {"tgtCcy": "base_ccy"}
 
         try:
@@ -182,7 +200,9 @@ class Okx:
         order_info: MarketOrder,
     ):
         # 수량기반
-        symbol = order_info.unified_symbol  # self.parse_symbol(order_info.base, order_info.quote)
+        symbol = (
+            order_info.unified_symbol
+        )  # self.parse_symbol(order_info.base, order_info.quote)
         fee = self.client.fetch_trading_fee(symbol)
         sell_amount = self.get_amount(order_info)
 
@@ -201,13 +221,28 @@ class Okx:
                 elif self.order_info.is_sell:
                     pos_side = "short"
             try:
-                if self.order_info.margin_mode is None or self.order_info.margin_mode == "isolated":
+                if (
+                    self.order_info.margin_mode is None
+                    or self.order_info.margin_mode == "isolated"
+                ):
                     if self.position_mode == "hedge":
-                        self.client.set_leverage(leverage, symbol, params={"mgnMode": "isolated", "posSide": pos_side})
+                        self.client.set_leverage(
+                            leverage,
+                            symbol,
+                            params={"mgnMode": "isolated", "posSide": pos_side},
+                        )
                     elif self.position_mode == "one-way":
-                        self.client.set_leverage(leverage, symbol, params={"mgnMode": "isolated", "posSide": "net"})
+                        self.client.set_leverage(
+                            leverage,
+                            symbol,
+                            params={"mgnMode": "isolated", "posSide": "net"},
+                        )
                 else:
-                    self.client.set_leverage(leverage, symbol, params={"mgnMode": self.order_info.margin_mode})
+                    self.client.set_leverage(
+                        leverage,
+                        symbol,
+                        params={"mgnMode": self.order_info.margin_mode},
+                    )
             except Exception as e:
                 pass
 
@@ -217,7 +252,9 @@ class Okx:
     ):
         from exchange.pexchange import retry
 
-        symbol = order_info.unified_symbol  # self.parse_symbol(order_info.base, order_info.quote)
+        symbol = (
+            order_info.unified_symbol
+        )  # self.parse_symbol(order_info.base, order_info.quote)
 
         entry_amount = self.get_amount(order_info)
         if entry_amount == 0:
@@ -275,7 +312,10 @@ class Okx:
         close_amount = self.get_amount(order_info)
 
         if self.position_mode == "one-way":
-            if self.order_info.margin_mode is None or self.order_info.margin_mode == "isolated":
+            if (
+                self.order_info.margin_mode is None
+                or self.order_info.margin_mode == "isolated"
+            ):
                 params = {"reduceOnly": True, "tdMode": "isolated"}
             elif self.order_info.margin_mode == "cross":
                 params = {"reduceOnly": True, "tdMode": "cross"}
@@ -291,7 +331,10 @@ class Okx:
                     pos_side = "short"
                 elif order_info.is_close:
                     pos_side = "long"
-            if self.order_info.margin_mode is None or self.order_info.margin_mode == "isolated":
+            if (
+                self.order_info.margin_mode is None
+                or self.order_info.margin_mode == "isolated"
+            ):
                 params = {"posSide": pos_side, "tdMode": "isolated"}
             elif self.order_info.margin_mode == "cross":
                 params = {"posSide": pos_side, "tdMode": "cross"}

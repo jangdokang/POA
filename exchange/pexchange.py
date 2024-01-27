@@ -45,10 +45,16 @@ def get_exchange(exchange_name: str, kis_number=None):
         KEY, SECRET, PASSPHRASE = check_key(exchange_name)
         if not payload.get(exchange_name):
             if exchange_name in ("BITGET", "OKX"):
-                payload |= {exchange_name: globals()[exchange_name.title()](KEY, SECRET, PASSPHRASE)}
+                payload |= {
+                    exchange_name: globals()[exchange_name.title()](
+                        KEY, SECRET, PASSPHRASE
+                    )
+                }
             else:
                 if not payload.get(exchange_name):
-                    payload |= {exchange_name: globals()[exchange_name.title()](KEY, SECRET)}
+                    payload |= {
+                        exchange_name: globals()[exchange_name.title()](KEY, SECRET)
+                    }
 
         return Exchange(**payload)
 
@@ -57,7 +63,11 @@ def get_exchange(exchange_name: str, kis_number=None):
         key = check_key(_kis)
         KEY, SECRET, ACCOUNT_NUMBER, ACCOUNT_CODE = key
         if not payload.get(_kis):
-            payload |= {_kis: globals()["KoreaInvestment"](KEY, SECRET, ACCOUNT_NUMBER, ACCOUNT_CODE, kis_number)}
+            payload |= {
+                _kis: globals()["KoreaInvestment"](
+                    KEY, SECRET, ACCOUNT_NUMBER, ACCOUNT_CODE, kis_number
+                )
+            }
         exchange = Exchange(**payload)
         kis: KoreaInvestment = exchange.dict()[_kis]
         kis.auth()
@@ -65,7 +75,9 @@ def get_exchange(exchange_name: str, kis_number=None):
 
 
 def get_bot(
-    exchange_name: Literal["BINANCE", "UPBIT", "BYBIT", "BITGET", "KRX", "NASDAQ", "NYSE", "AMEX", "OKX"],
+    exchange_name: Literal[
+        "BINANCE", "UPBIT", "BYBIT", "BITGET", "KRX", "NASDAQ", "NYSE", "AMEX", "OKX"
+    ],
     kis_number=None,
 ) -> Binance | Upbit | Bybit | Bitget | KoreaInvestment | Okx:
     exchange_name = exchange_name.upper()
@@ -151,7 +163,9 @@ def retry(
                             elif order_info.is_close:
                                 params = {"reduceOnly": True}
 
-                        args = tuple(params if i == 5 else arg for i, arg in enumerate(args))
+                        args = tuple(
+                            params if i == 5 else arg for i, arg in enumerate(args)
+                        )
 
                     else:
                         attempts = max_attempts
@@ -166,14 +180,20 @@ def retry(
                                     params = {"position_idx": position_idx}
                                 elif order_info.is_close:
                                     position_idx = 2
-                                    params = {"reduceOnly": True, "position_idx": position_idx}
+                                    params = {
+                                        "reduceOnly": True,
+                                        "position_idx": position_idx,
+                                    }
                             elif order_info.side == "sell":
                                 if order_info.is_entry:
                                     position_idx = 2
                                     params = {"position_idx": position_idx}
                                 elif order_info.is_close:
                                     position_idx = 1
-                                    params = {"reduceOnly": True, "position_idx": position_idx}
+                                    params = {
+                                        "reduceOnly": True,
+                                        "position_idx": position_idx,
+                                    }
                         elif instance.position_mode == "hedge":
                             instance.position_mode = "one-way"
                             if order_info.is_entry:
@@ -181,7 +201,9 @@ def retry(
                             elif order_info.is_close:
                                 params = {"reduceOnly": True, "position_idx": 0}
 
-                        args = tuple(params if i == 5 else arg for i, arg in enumerate(args))
+                        args = tuple(
+                            params if i == 5 else arg for i, arg in enumerate(args)
+                        )
                     elif "check your server timestamp" in str(e):
                         bybit: Bybit = instance
                         bybit.load_time_difference()
@@ -206,7 +228,10 @@ def retry(
                                 elif order_info.is_close:
                                     pos_side = "long"
 
-                            if order_info.margin_mode is None or order_info.margin_mode == "isolated":
+                            if (
+                                order_info.margin_mode is None
+                                or order_info.margin_mode == "isolated"
+                            ):
                                 params |= {"posSide": pos_side, "tdMode": "isolated"}
                             elif order_info.margin_mode == "cross":
                                 params |= {"posSide": pos_side, "tdMode": "cross"}
@@ -221,13 +246,17 @@ def retry(
                             if order_info.leverage is None:
                                 instance.set_leverage(1, order_info.unified_symbol)
                             else:
-                                instance.set_leverage(order_info.leverage, order_info.unified_symbol)
+                                instance.set_leverage(
+                                    order_info.leverage, order_info.unified_symbol
+                                )
                             if order_info.margin_mode is None:
                                 params |= {"tdMode": "isolated"}
                             else:
                                 params |= {"tdMode": order_info.margin_mode}
 
-                        args = tuple(params if i == 5 else arg for i, arg in enumerate(args))
+                        args = tuple(
+                            params if i == 5 else arg for i, arg in enumerate(args)
+                        )
                     else:
                         attempts = max_attempts
                 elif order_info.exchange in ("BITGET"):
@@ -236,30 +265,48 @@ def retry(
                             instance.position_mode = "one-way"
                             new_side = order_info.side + "_single"
                             new_params = {"side": new_side}
-                            args = tuple(new_side if i == 2 else arg for i, arg in enumerate(args))
-                            args = tuple(new_params if i == 5 else arg for i, arg in enumerate(args))
+                            args = tuple(
+                                new_side if i == 2 else arg
+                                for i, arg in enumerate(args)
+                            )
+                            args = tuple(
+                                new_params if i == 5 else arg
+                                for i, arg in enumerate(args)
+                            )
                         elif instance.position_mode == "one-way":
                             instance.position_mode = "hedge"
                             if order_info.is_entry:
                                 new_params = {}
                             elif order_info.is_close:
                                 new_params = {"reduceOnly": True}
-                            args = tuple(new_params if i == 5 else arg for i, arg in enumerate(args))
+                            args = tuple(
+                                new_params if i == 5 else arg
+                                for i, arg in enumerate(args)
+                            )
 
                     elif "two-way positions" in str(e):
                         if instance.position_mode == "hedge":
                             instance.position_mode = "one-way"
                             new_side = order_info.side + "_single"
                             new_params = {"reduceOnly": True, "side": new_side}
-                            args = tuple(new_side if i == 2 else arg for i, arg in enumerate(args))
-                            args = tuple(new_params if i == 5 else arg for i, arg in enumerate(args))
+                            args = tuple(
+                                new_side if i == 2 else arg
+                                for i, arg in enumerate(args)
+                            )
+                            args = tuple(
+                                new_params if i == 5 else arg
+                                for i, arg in enumerate(args)
+                            )
                         elif instance.position_mode == "one-way":
                             instance.position_mode = "hedge"
                             if order_info.is_entry:
                                 new_params = {}
                             elif order_info.is_close:
                                 new_params = {"reduceOnly": True}
-                            args = tuple(new_params if i == 5 else arg for i, arg in enumerate(args))
+                            args = tuple(
+                                new_params if i == 5 else arg
+                                for i, arg in enumerate(args)
+                            )
                     else:
                         attempts = max_attempts
                 else:
