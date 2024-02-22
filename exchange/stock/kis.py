@@ -12,11 +12,22 @@ from devtools import debug
 
 
 class KoreaInvestment:
-    def __init__(self, key: str, secret: str, account_number: str, account_code: str, kis_number: int):
+    def __init__(
+        self,
+        key: str,
+        secret: str,
+        account_number: str,
+        account_code: str,
+        kis_number: int,
+    ):
         self.key = key
         self.secret = secret
         self.kis_number = kis_number
-        self.base_url = BaseUrls.base_url.value if kis_number != 4 else BaseUrls.paper_base_url.value
+        self.base_url = (
+            BaseUrls.base_url.value
+            if kis_number != 4
+            else BaseUrls.paper_base_url.value
+        )
         self.is_auth = False
         self.account_number = account_number
         self.base_headers = {}
@@ -25,8 +36,14 @@ class KoreaInvestment:
         self.auth()
 
         self.base_body = {}
-        self.base_order_body = AccountInfo(CANO=account_number, ACNT_PRDT_CD=account_code)
-        self.order_exchange_code = {"NASDAQ": ExchangeCode.NASDAQ, "NYSE": ExchangeCode.NYSE, "AMEX": ExchangeCode.AMEX}
+        self.base_order_body = AccountInfo(
+            CANO=account_number, ACNT_PRDT_CD=account_code
+        )
+        self.order_exchange_code = {
+            "NASDAQ": ExchangeCode.NASDAQ,
+            "NYSE": ExchangeCode.NYSE,
+            "AMEX": ExchangeCode.AMEX,
+        }
         self.query_exchange_code = {
             "NASDAQ": QueryExchangeCode.NASDAQ,
             "NYSE": QueryExchangeCode.NYSE,
@@ -44,7 +61,9 @@ class KoreaInvestment:
         # headers |= self.base_headers
         return self.session.get(url, params=params, headers=headers).json()
 
-    def post_with_error_handling(self, endpoint: str, data: dict = None, headers: dict = None):
+    def post_with_error_handling(
+        self, endpoint: str, data: dict = None, headers: dict = None
+    ):
         url = f"{self.base_url}{endpoint}"
         response = self.session.post(url, json=data, headers=headers).json()
         if "access_token" in response.keys() or response["rt_cd"] == "0":
@@ -85,12 +104,17 @@ class KoreaInvestment:
                             "custtype": "P",
                             "tr_id": "FHKST01010300",
                         },
-                        params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": "005930"},
+                        params={
+                            "FID_COND_MRKT_DIV_CODE": "J",
+                            "FID_INPUT_ISCD": "005930",
+                        },
                     ).json()
                     if response["msg_cd"] == "EGW00123":
                         return False
 
-            access_token_token_expired = datetime.strptime(access_token_token_expired, "%Y-%m-%d %H:%M:%S")
+            access_token_token_expired = datetime.strptime(
+                access_token_token_expired, "%Y-%m-%d %H:%M:%S"
+            )
             diff = access_token_token_expired - datetime.now()
             total_seconds = diff.total_seconds()
             if total_seconds < 60 * 60:
@@ -124,7 +148,10 @@ class KoreaInvestment:
             self.is_auth = True
         access_token = auth[0]
         self.base_headers = BaseHeaders(
-            authorization=f"Bearer {access_token}", appkey=self.key, appsecret=self.secret, custtype="P"
+            authorization=f"Bearer {access_token}",
+            appkey=self.key,
+            appsecret=self.secret,
+            custtype="P",
         ).dict()
         return auth
 
@@ -139,7 +166,11 @@ class KoreaInvestment:
         price: int = 0,
         mintick=0.01,
     ):
-        endpoint = Endpoints.korea_order.value if exchange == "KRX" else Endpoints.usa_order.value
+        endpoint = (
+            Endpoints.korea_order.value
+            if exchange == "KRX"
+            else Endpoints.usa_order.value
+        )
         body = self.base_order_body.dict()
         headers = copy.deepcopy(self.base_headers)
         price = str(price)
@@ -148,29 +179,51 @@ class KoreaInvestment:
 
         if exchange == "KRX":
             if self.base_url == BaseUrls.base_url:
-                headers |= KoreaBuyOrderHeaders(**headers) if side == "buy" else KoreaSellOrderHeaders(**headers)
+                headers |= (
+                    KoreaBuyOrderHeaders(**headers)
+                    if side == "buy"
+                    else KoreaSellOrderHeaders(**headers)
+                )
             elif self.base_url == BaseUrls.paper_base_url:
                 headers |= (
-                    KoreaPaperBuyOrderHeaders(**headers) if side == "buy" else KoreaPaperSellOrderHeaders(**headers)
+                    KoreaPaperBuyOrderHeaders(**headers)
+                    if side == "buy"
+                    else KoreaPaperSellOrderHeaders(**headers)
                 )
 
             if order_type == "market":
                 body |= KoreaMarketOrderBody(**body, PDNO=ticker, ORD_QTY=amount)
             elif order_type == "limit":
                 body |= KoreaOrderBody(
-                    **body, PDNO=ticker, ORD_DVSN=KoreaOrderType.limit, ORD_QTY=amount, ORD_UNPR=price
+                    **body,
+                    PDNO=ticker,
+                    ORD_DVSN=KoreaOrderType.limit,
+                    ORD_QTY=amount,
+                    ORD_UNPR=price,
                 )
         elif exchange in ("NASDAQ", "NYSE", "AMEX"):
             exchange_code = self.order_exchange_code.get(exchange)
             current_price = self.fetch_current_price(exchange, ticker)
-            price = current_price + mintick * 50 if side == "buy" else current_price - mintick * 50
+            price = (
+                current_price + mintick * 50
+                if side == "buy"
+                else current_price - mintick * 50
+            )
             if price < 1:
                 price = 1.0
             price = float("{:.2f}".format(price))
             if self.base_url == BaseUrls.base_url:
-                headers |= UsaBuyOrderHeaders(**headers) if side == "buy" else UsaSellOrderHeaders(**headers)
+                headers |= (
+                    UsaBuyOrderHeaders(**headers)
+                    if side == "buy"
+                    else UsaSellOrderHeaders(**headers)
+                )
             elif self.base_url == BaseUrls.paper_base_url:
-                headers |= UsaPaperBuyOrderHeaders(**headers) if side == "buy" else UsaPaperSellOrderHeaders(**headers)
+                headers |= (
+                    UsaPaperBuyOrderHeaders(**headers)
+                    if side == "buy"
+                    else UsaPaperSellOrderHeaders(**headers)
+                )
 
             if order_type == "market":
                 body |= UsaOrderBody(
@@ -193,7 +246,11 @@ class KoreaInvestment:
         return self.post(endpoint, body, headers)
 
     def create_market_buy_order(
-        self, exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"], ticker: str, amount: int, price: int = 0
+        self,
+        exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
+        ticker: str,
+        amount: int,
+        price: int = 0,
     ):
         if exchange == "KRX":
             return self.create_order(exchange, ticker, "market", "buy", amount)
@@ -201,7 +258,11 @@ class KoreaInvestment:
             return self.create_order(exchange, ticker, "market", "buy", amount, price)
 
     def create_market_sell_order(
-        self, exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"], ticker: str, amount: int, price: int = 0
+        self,
+        exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
+        ticker: str,
+        amount: int,
+        price: int = 0,
     ):
         if exchange == "KRX":
             return self.create_order(exchange, ticker, "market", "sell", amount)
@@ -217,7 +278,9 @@ class KoreaInvestment:
     def create_usa_market_buy_order(self, ticker: str, amount: int, price: int):
         return self.create_market_buy_order("usa", ticker, amount, price)
 
-    def fetch_ticker(self, exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"], ticker: str):
+    def fetch_ticker(
+        self, exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"], ticker: str
+    ):
         if exchange == "KRX":
             endpoint = Endpoints.korea_ticker.value
             headers = KoreaTickerHeaders(**self.base_headers).dict()

@@ -4,6 +4,7 @@ from devtools import debug
 
 from exchange.model import MarketOrder
 import exchange.error as error
+from decimal import Decimal
 
 
 class Okx:
@@ -116,7 +117,14 @@ class Okx:
             raise error.AmountPercentBothError()
         elif order_info.amount is not None:
             if order_info.is_contract:
-                result = order_info.amount // order_info.contract_size
+                result = self.client.amount_to_precision(
+                    order_info.unified_symbol,
+                    float(
+                        Decimal(str(order_info.amount))
+                        // Decimal(str(order_info.contract_size))
+                    ),
+                )
+
             else:
                 result = order_info.amount
         elif order_info.percent is not None:
@@ -156,7 +164,7 @@ class Okx:
         else:
             raise error.AmountPercentNoneError()
 
-        return result
+        return float(result)
 
     def market_order(self, order_info: MarketOrder):
         from exchange.pexchange import retry
