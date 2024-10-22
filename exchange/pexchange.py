@@ -263,22 +263,24 @@ def retry(
                     if "unilateral position" in str(e):
                         if instance.position_mode == "hedge":
                             instance.position_mode = "one-way"
-                            new_side = order_info.side + "_single"
-                            new_params = {"side": new_side}
-                            args = tuple(
-                                new_side if i == 2 else arg
-                                for i, arg in enumerate(args)
-                            )
+                            new_params = {"oneWayMode": True}
                             args = tuple(
                                 new_params if i == 5 else arg
                                 for i, arg in enumerate(args)
                             )
                         elif instance.position_mode == "one-way":
                             instance.position_mode = "hedge"
+
                             if order_info.is_entry:
-                                new_params = {}
+                                if order_info.is_futures:
+                                    if order_info.is_buy:
+                                        trade_side = "Open" 
+                                    else:
+                                        trade_side = "open"
+                                    new_params = { "tradeSide": trade_side }
                             elif order_info.is_close:
-                                new_params = {"reduceOnly": True}
+                                new_params = {"reduceOnly": True, "tradeSide":"close"}
+                            
                             args = tuple(
                                 new_params if i == 5 else arg
                                 for i, arg in enumerate(args)

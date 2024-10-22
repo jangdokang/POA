@@ -187,10 +187,14 @@ class Bitget:
         if entry_amount == 0:
             raise error.MinAmountError()
         if self.position_mode == "one-way":
-            new_side = order_info.side + "_single"
-            params = {"side": new_side}
+            params = { "oneWayMode": True }
         elif self.position_mode == "hedge":
-            params = {}
+            if order_info.is_futures:
+                if order_info.is_buy:
+                    trade_side = "Open" 
+                else:
+                    trade_side = "open"
+                params = { "tradeSide": trade_side }
         if order_info.leverage is not None:
             self.set_leverage(order_info.leverage, symbol)
         try:
@@ -216,17 +220,21 @@ class Bitget:
 
         symbol = self.order_info.unified_symbol
         close_amount = self.get_amount(order_info)
+        final_side = order_info.side
         if self.position_mode == "one-way":
-            new_side = order_info.side + "_single"
-            params = {"reduceOnly": True, "side": new_side}
+            params = {"reduceOnly": True, "oneWayMode": True}
         elif self.position_mode == "hedge":
-            params = {"reduceOnly": True}
+            if order_info.side == "sell":
+                final_side = "buy"
+            elif order_info.side == "buy":
+                final_side = "sell"
+            params = {"reduceOnly": True, "tradeSide":"close"}
         try:
             result = retry(
                 self.client.create_order,
                 symbol,
                 order_info.type.lower(),
-                order_info.side,
+                final_side,
                 abs(close_amount),
                 None,
                 params,

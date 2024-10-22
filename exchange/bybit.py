@@ -207,17 +207,17 @@ class Bybit:
             if order_info.side == "buy":
                 if order_info.is_entry:
                     position_idx = 1
-                    params = {"position_idx": position_idx}
+                    params = {"position_idx": position_idx, "hedged": True}
                 elif order_info.is_close:
                     position_idx = 2
-                    params = {"reduceOnly": True, "position_idx": position_idx}
+                    params = {"reduceOnly": True, "position_idx": position_idx, "hedged": True}
             elif order_info.side == "sell":
                 if order_info.is_entry:
                     position_idx = 2
-                    params = {"position_idx": position_idx}
+                    params = {"position_idx": position_idx, "hedged": True}
                 elif order_info.is_close:
                     position_idx = 1
-                    params = {"reduceOnly": True, "position_idx": position_idx}
+                    params = {"reduceOnly": True, "position_idx": position_idx, "hedged": True}
 
         if order_info.leverage is not None:
             self.set_leverage(order_info.leverage, symbol)
