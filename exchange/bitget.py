@@ -125,24 +125,8 @@ class Bitget:
         return result
 
     def set_leverage(self, leverage, symbol):
-        if self.order_info.is_buy:
-            hold_side = "long"
-        elif self.order_info.is_sell:
-            hold_side = "short"
-        market = self.client.market(symbol)
-        request = {
-            "symbol": market["id"],
-            "marginCoin": market["settleId"],
-            "leverage": leverage,
-            # 'holdSide': 'long' or 'short',
-        }
-
-        account = self.client.privateMixGetAccountAccount(
-            {"symbol": market["id"], "marginCoin": market["settleId"]}
-        )
-        if account["data"]["marginMode"] == "fixed":
-            request |= {"holdSide": hold_side}
-        return self.client.privateMixPostAccountSetLeverage(request)
+        if self.order_info.is_futures:
+            return self.client.set_leverage(leverage, symbol)
 
     def market_order(self, order_info: MarketOrder):
         from exchange.pexchange import retry
