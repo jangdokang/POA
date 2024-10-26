@@ -149,12 +149,14 @@ def retry(
                                     positionSide = "LONG"
                                 elif order_info.is_close:
                                     positionSide = "SHORT"
+                                    
                             elif order_info.side == "sell":
                                 if order_info.is_entry:
                                     positionSide = "SHORT"
                                 elif order_info.is_close:
                                     positionSide = "LONG"
-
+                                    
+    
                             params = {"positionSide": positionSide}
                         elif instance.position_mode == "hedge":
                             instance.position_mode = "one-way"
@@ -260,8 +262,8 @@ def retry(
                     else:
                         attempts = max_attempts
                 elif order_info.exchange in ("BITGET"):
-                    if "unilateral position" in str(e) or "hold side is null" in str(e):
-                        print(str(e), "에 걸렸다!")
+                    if "unilateral position" in str(e) or "hold side is null" in str(e) or "No position to close" in str(e):
+                        final_side = order_info.side
                         if instance.position_mode == "hedge":
                             instance.position_mode = "one-way"
                             new_params = {"oneWayMode": True}
@@ -280,10 +282,19 @@ def retry(
                                         trade_side = "open"
                                     new_params = { "tradeSide": trade_side }
                             elif order_info.is_close:
+                                if order_info.side == "sell":
+                                    final_side = "buy"
+                                elif order_info.side == "buy":
+                                    final_side = "sell"
                                 new_params = {"reduceOnly": True, "tradeSide":"close"}
                             
                             args = tuple(
                                 new_params if i == 5 else arg
+                                for i, arg in enumerate(args)
+                            )
+
+                            args = tuple(
+                                final_side if i == 2 else arg
                                 for i, arg in enumerate(args)
                             )
 
