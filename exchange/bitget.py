@@ -129,7 +129,7 @@ class Bitget:
             if self.position_mode == "one-way":
                 hold_side = "long" if self.order_info.is_buy else "short"
                 return self.client.set_leverage(leverage, symbol, params= { "holdSide": hold_side })
-            elif self.position_mode == "hedge":
+            elif self.position_mode == "hedge": 
                 return self.client.set_leverage(leverage, symbol)
 
     def market_order(self, order_info: MarketOrder):
@@ -187,7 +187,7 @@ class Bitget:
                 
         params |= { "marginMode": order_info.margin_mode or "isolated" }
         if order_info.leverage is not None:
-            self.set_leverage(order_info.leverage, symbol)
+            retry(self.set_leverage, order_info.leverage, symbol, order_info = order_info, instance = self)
         try:
             return retry(
                 self.client.create_order,

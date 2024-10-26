@@ -137,7 +137,7 @@ def retry(
         except Exception as e:
             logger.error(f"에러 발생: {str(e)}")
             attempts += 1
-            if func.__name__ == "create_order":
+            if func.__name__ == "create_order" or func.__name__ == "set_leverage":
                 if order_info.exchange in ("BINANCE"):
                     if "Internal error" in str(e):
                         time.sleep(delay)  # 재시도 간격 설정
@@ -260,7 +260,8 @@ def retry(
                     else:
                         attempts = max_attempts
                 elif order_info.exchange in ("BITGET"):
-                    if "unilateral position" in str(e):
+                    if "unilateral position" in str(e) or "hold side is null" in str(e):
+                        print(str(e), "에 걸렸다!")
                         if instance.position_mode == "hedge":
                             instance.position_mode = "one-way"
                             new_params = {"oneWayMode": True}
