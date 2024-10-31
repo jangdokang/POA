@@ -264,9 +264,10 @@ def retry(
                 elif order_info.exchange in ("BITGET"):
                     if "unilateral position" in str(e) or "hold side is null" in str(e) or "No position to close" in str(e):
                         final_side = order_info.side
+                        margin_mode = args[-1].get("marginMode") or "isolated"
                         if instance.position_mode == "hedge":
                             instance.position_mode = "one-way"
-                            new_params = {"oneWayMode": True}
+                            new_params = {"oneWayMode": True, "marginMode": margin_mode}
                             args = tuple(
                                 new_params if i == 5 else arg
                                 for i, arg in enumerate(args)
@@ -280,7 +281,7 @@ def retry(
                                         trade_side = "Open" 
                                     else:
                                         trade_side = "open"
-                                    new_params = { "tradeSide": trade_side }
+                                    new_params = { "tradeSide": trade_side, "marginMode": margin_mode}
                             elif order_info.is_close:
                                 if order_info.side == "sell":
                                     final_side = "buy"
@@ -297,6 +298,7 @@ def retry(
                                 final_side if i == 2 else arg
                                 for i, arg in enumerate(args)
                             )
+
 
                     elif "two-way positions" in str(e):
                         if instance.position_mode == "hedge":

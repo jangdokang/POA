@@ -125,12 +125,9 @@ class Bitget:
         return result
 
     def set_leverage(self, leverage, symbol):
-        if self.order_info.is_futures:
-            if self.position_mode == "one-way":
-                hold_side = "long" if self.order_info.is_buy else "short"
-                return self.client.set_leverage(leverage, symbol, params= { "holdSide": hold_side })
-            elif self.position_mode == "hedge": 
-                return self.client.set_leverage(leverage, symbol)
+        
+        hold_side = "long" if self.order_info.is_buy else "short"
+        return self.client.set_leverage(leverage, symbol, params= { "holdSide": hold_side })
 
     def market_order(self, order_info: MarketOrder):
         from exchange.pexchange import retry
@@ -186,6 +183,9 @@ class Bitget:
                 params = { "tradeSide": trade_side }
                 
         params |= { "marginMode": order_info.margin_mode or "isolated" }
+        if order_info.margin_mode is not None:
+            self.client.set_margin_mode(order_info.margin_mode, symbol)
+
         if order_info.leverage is not None:
             retry(self.set_leverage, order_info.leverage, symbol, order_info = order_info, instance = self)
         try:
