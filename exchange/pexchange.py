@@ -124,7 +124,7 @@ def retry(
     func,
     *args,
     order_info: MarketOrder,
-    max_attempts=3,
+    max_attempts=5,
     delay=1,
     instance: Binance | Bybit | Bitget | Upbit | Okx = None,
 ):
@@ -141,6 +141,8 @@ def retry(
                 if order_info.exchange in ("BINANCE"):
                     if "Internal error" in str(e):
                         time.sleep(delay)  # 재시도 간격 설정
+                    elif "Server is currently overloaded" in str(e):
+                        time.sleep(delay)
                     elif "position side does not match" in str(e):
                         if instance.position_mode == "one-way":
                             instance.position_mode = "hedge"
