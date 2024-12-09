@@ -155,7 +155,6 @@ class KoreaInvestment:
         ).dict()
         return auth
 
-    @validate_arguments
     def create_order(
         self,
         exchange: Literal["KRX", "NASDAQ", "NYSE", "AMEX"],
@@ -166,84 +165,95 @@ class KoreaInvestment:
         price: int = 0,
         mintick=0.01,
     ):
-        endpoint = (
-            Endpoints.korea_order.value
-            if exchange == "KRX"
-            else Endpoints.usa_order.value
-        )
-        body = self.base_order_body.dict()
-        headers = copy.deepcopy(self.base_headers)
-        price = str(price)
+        max_retries = 3
+        last_exception = None
+        
+        for attempt in range(max_retries):
+            try:
+                endpoint = (
+                    Endpoints.korea_order.value
+                    if exchange == "KRX"
+                    else Endpoints.usa_order.value
+                )
+                body = self.base_order_body.dict()
+                headers = copy.deepcopy(self.base_headers)
+                price = str(price)
 
-        amount = str(int(amount))
+                amount = str(int(amount))
 
-        if exchange == "KRX":
-            if self.base_url == BaseUrls.base_url:
-                headers |= (
-                    KoreaBuyOrderHeaders(**headers)
-                    if side == "buy"
-                    else KoreaSellOrderHeaders(**headers)
-                )
-            elif self.base_url == BaseUrls.paper_base_url:
-                headers |= (
-                    KoreaPaperBuyOrderHeaders(**headers)
-                    if side == "buy"
-                    else KoreaPaperSellOrderHeaders(**headers)
-                )
+                if exchange == "KRX":
+                    if self.base_url == BaseUrls.base_url:
+                        headers |= (
+                            KoreaBuyOrderHeaders(**headers)
+                            if side == "buy"
+                            else KoreaSellOrderHeaders(**headers)
+                        )
+                    elif self.base_url == BaseUrls.paper_base_url:
+                        headers |= (
+                            KoreaPaperBuyOrderHeaders(**headers)
+                            if side == "buy"
+                            else KoreaPaperSellOrderHeaders(**headers)
+                        )
 
-            if order_type == "market":
-                body |= KoreaMarketOrderBody(**body, PDNO=ticker, ORD_QTY=amount)
-            elif order_type == "limit":
-                body |= KoreaOrderBody(
-                    **body,
-                    PDNO=ticker,
-                    ORD_DVSN=KoreaOrderType.limit,
-                    ORD_QTY=amount,
-                    ORD_UNPR=price,
-                )
-        elif exchange in ("NASDAQ", "NYSE", "AMEX"):
-            exchange_code = self.order_exchange_code.get(exchange)
-            current_price = self.fetch_current_price(exchange, ticker)
-            price = (
-                current_price + mintick * 50
-                if side == "buy"
-                else current_price - mintick * 50
-            )
-            if price < 1:
-                price = 1.0
-            price = float("{:.2f}".format(price))
-            if self.base_url == BaseUrls.base_url:
-                headers |= (
-                    UsaBuyOrderHeaders(**headers)
-                    if side == "buy"
-                    else UsaSellOrderHeaders(**headers)
-                )
-            elif self.base_url == BaseUrls.paper_base_url:
-                headers |= (
-                    UsaPaperBuyOrderHeaders(**headers)
-                    if side == "buy"
-                    else UsaPaperSellOrderHeaders(**headers)
-                )
+                    if order_type == "market":
+                        body |= KoreaMarketOrderBody(**body, PDNO=ticker, ORD_QTY=amount)
+                    elif order_type == "limit":
+                        body |= KoreaOrderBody(
+                            **body,
+                            PDNO=ticker,
+                            ORD_DVSN=KoreaOrderType.limit,
+                            ORD_QTY=amount,
+                            ORD_UNPR=price,
+                        )
+                elif exchange in ("NASDAQ", "NYSE", "AMEX"):
+                    exchange_code = self.order_exchange_code.get(exchange)
+                    current_price = self.fetch_current_price(exchange, ticker)
+                    price = (
+                        current_price + mintick * 50
+                        if side == "buy"
+                        else current_price - mintick * 50
+                    )
+                    if price < 1:
+                        price = 1.0
+                    price = float("{:.2f}".format(price))
+                    if self.base_url == BaseUrls.base_url:
+                        headers |= (
+                            UsaBuyOrderHeaders(**headers)
+                            if side == "buy"
+                            else UsaSellOrderHeaders(**headers)
+                        )
+                    elif self.base_url == BaseUrls.paper_base_url:
+                        headers |= (
+                            UsaPaperBuyOrderHeaders(**headers)
+                            if side == "buy"
+                            else UsaPaperSellOrderHeaders(**headers)
+                        )
 
-            if order_type == "market":
-                body |= UsaOrderBody(
-                    **body,
-                    PDNO=ticker,
-                    ORD_DVSN=UsaOrderType.limit.value,
-                    ORD_QTY=amount,
-                    OVRS_ORD_UNPR=price,
-                    OVRS_EXCG_CD=exchange_code,
-                )
-            elif order_type == "limit":
-                body |= UsaOrderBody(
-                    **body,
-                    PDNO=ticker,
-                    ORD_DVSN=UsaOrderType.limit.value,
-                    ORD_QTY=amount,
-                    OVRS_ORD_UNPR=price,
-                    OVRS_EXCG_CD=exchange_code,
-                )
-        return self.post(endpoint, body, headers)
+                    if order_type == "market":
+                        body |= UsaOrderBody(
+                            **body,
+                            PDNO=ticker,
+                            ORD_DVSN=UsaOrderType.limit.value,
+                            ORD_QTY=amount,
+                            OVRS_ORD_UNPR=price,
+                            OVRS_EXCG_CD=exchange_code,
+                        )
+                    elif order_type == "limit":
+                        body |= UsaOrderBody(
+                            **body,
+                            PDNO=ticker,
+                            ORD_DVSN=UsaOrderType.limit.value,
+                            ORD_QTY=amount,
+                            OVRS_ORD_UNPR=price,
+                            OVRS_EXCG_CD=exchange_code,
+                        )
+                return self.post(endpoint, body, headers)
+            except Exception as e:
+                last_exception = e
+                if attempt < max_retries - 1:  
+                    continue
+                else:
+                    raise last_exception 
 
     def create_market_buy_order(
         self,
