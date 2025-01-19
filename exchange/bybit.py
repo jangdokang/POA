@@ -83,12 +83,8 @@ class Bybit:
             self.order_info.is_spot
             and (self.order_info.is_buy or self.order_info.is_sell)
         ):
-            free_balance = (
-                self.client.fetch_free_balance()
-                if not self.order_info.is_total
-                else self.client.fetch_total_balance()
-            )
-            free_balance_by_base = free_balance.get(base)
+            balance_by_base = self.client.fetch_balance().get(base)
+            free_balance_by_base = balance_by_base.get("free") or balance_by_base.get("total") if not self.order_info.is_total else balance_by_base.get("total")
 
         if free_balance_by_base is None or free_balance_by_base == 0:
             raise error.FreeAmountNoneError()
@@ -190,6 +186,7 @@ class Bybit:
     def market_sell(self, order_info: MarketOrder):
         sell_amount = self.get_amount(order_info)
         order_info.amount = sell_amount
+        order_info.price = None
         return self.market_order(order_info)
 
     def market_entry(self, order_info: MarketOrder):

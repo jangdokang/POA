@@ -223,8 +223,11 @@ class OrderRequest(BaseModel):
     def root_validate(cls, values):
         # "NaN" to None
         for key, value in values.items():
-            if value in ("NaN", ""):
+            if isinstance(value, str):
+                values[key] = value.replace(',', '')
+            if values[key] in ("NaN", ""):
                 values[key] = None
+            
 
         values |= get_extra_order_info(values)
 
@@ -246,7 +249,6 @@ class OrderRequest(BaseModel):
 
         if values["exchange"] in STOCK_EXCHANGES:
             values["is_stock"] = True
-        # debug("after", values)
         return values
 
 
@@ -278,7 +280,9 @@ class PriceRequest(BaseModel):
     def root_validate(cls, values):
         # "NaN" to None
         for key, value in values.items():
-            if value in ("NaN", ""):
+            if isinstance(value, str):
+                values[key] = value.replace(',', '')
+            if values[key] in ("NaN", ""):
                 values[key] = None
 
         values |= get_extra_order_info(values)
